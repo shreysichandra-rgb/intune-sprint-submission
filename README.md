@@ -4,11 +4,11 @@ A WhatsApp text companion for women navigating perimenopause. InTune keeps user-
 
 Live product: https://graceful-ptarmigan-19.convex.site/
 
-New, previously unentitled users can send Join for one free24-hour trial, starting on confirmed welcome delivery. Repeat Join does not restart it. Optional continuation is INR99 once for seven days, starting on confirmed paid-welcome delivery, without automatic charging or renewal. Existing paid/coupon access is preserved; retrieval/correction/deletion remain after expiry. The landing page explains the same free24-hour Join entry and optional INR99 continuation.
+New, previously unentitled users can send Join for one free 24-hour trial, starting on confirmed welcome delivery. Repeat Join does not restart it. Optional continuation is INR 99 once for seven days, starting on confirmed paid-welcome delivery, without automatic charging or renewal. Existing paid/coupon access is preserved; retrieval/correction/deletion remain after expiry. The landing page explains the same free 24-hour Join entry and optional INR 99 continuation.
 
 ## Local verification
 
-Use Node.js24 and the committed lockfile.
+Use Node.js 24 and the committed lockfile.
 
 ```sh
 npm ci
@@ -27,6 +27,10 @@ npm run dev starts the local frontend. The local lab/QA scripts require their se
 
 ## Source and publication status
 
-This local candidate is based on recorded live backend commit1beed3605d92c9da428ddfc00cee6dda2da01653 and static release613314eb-0249-4056-a8f0-fc06dd05ccc1. Backend provenance comes from the recorded release archive/CLI, not a server-attested Git hash. Public landing sources were recovered byte-for-byte from the live site; only their offline packaging script differs from the historical release workflow. No runtime backend change is proposed.
+This is a new, separate submission repository with clean local history. The original repository and its private history are retained separately and are not included here. No customer chats, evidence exports or environment values belong in this repository.
 
-This branch retains its existing ancestry. Removing private review/output documents at the branch tip does not remove historical copies. History/media provenance review remains a publication blocker until the accompanying private audit is cleared. Do not push or make the repository public based on this README alone.
+The runtime combines recorded live backend source `1beed36` and Hindi explanation repair `01c4975`, plus landing-page wording matching the enabled free 24-hour trial. It was released to the existing host on 16 October 2026, static release `fbf2f64d-7898-4ca5-938e-7d2d1785b893`. Backend provenance relies on the recorded CLI release, not an independently server-attested Git hash.
+
+Verification: 1,280 automated tests passed, one optional provider test skipped; fresh install, type checks and build passed. All 38 public files matched the build after release, and 21 pre-existing access clocks were unchanged. Fictional actual-AI Hinglish food saving was checked before release. Real-phone Hindi response and the final save/reopen/retrieve check remain unverified.
+
+Publication is awaiting founder approval. A local source snapshot or deployment does not imply GitHub is public or that Sprint submission has occurred.
