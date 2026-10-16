@@ -468,3 +468,13 @@ test('clock plus acknowledgement fills only the second pending reminder and pres
  expect((await send('Tomorrow',{introduced:true,reply:'Checking the reminder.',actions:[],tasks:[]},'packing-day')).outcome).toBe('conversation');
  const final=await t.query(q('v4Store:context'),{token,messageId:'peek-final',text:'show'});expect(final.state.reminders).toHaveLength(2);expect(final.state.reminders.find((r:any)=>r.id===before.state.reminders[0].id)).toEqual(before.state.reminders[0]);expect(final.state.reminders.find((r:any)=>r.title==='review my packing list')).toMatchObject({time:'18:00',dueAt:Date.parse('2026-10-12T12:30:00Z')});
 });
+
+test('an explicit today plus matching named date schedules the fictional reminder once (simulated AI)',async()=>{
+ const {t,token,send}=await setup();vi.stubEnv('INTUNE_SYNTHETIC_TRANSPORT','1');vi.stubEnv('WHATSAPP_ACCESS_TOKEN','synthetic');vi.stubEnv('WHATSAPP_PHONE_NUMBER_ID','fictional');
+ const text='Remind me today, 11 October 2026, at 10:40 pm to review my fictional packing list.';
+ const result=await send(text,{introduced:true,reply:'I will remind you today at 10:40 pm to review your fictional packing list.',actions:[{type:'save',kind:'task',label:'review my fictional packing list',evidence:'review my fictional packing list',tempId:'packing'},{type:'reminder',targetId:'packing',datePhrase:'today, 11 October 2026',timePhrase:'10:40 pm',evidence:text,permissionEvidence:text,repeat:'once'}],tasks:[]},'fictional-labelled-date');
+ expect(result.outcome).toBe('conversation');
+ const c=await t.query(q('v4Store:context'),{token,messageId:'inspect-packing',text:''});expect(c.state.reminders).toHaveLength(1);expect(c.state.reminders[0].dueAt).toBe(Date.parse('2026-10-11T17:10:00Z'));expect(c.state.tasks.filter((x:any)=>x.question)).toEqual([]);
+ expect((await t.action(api.messages.send,{token,messageId:'fictional-labelled-date',text})).outcome).toBe('provider_duplicate');
+ expect((await t.query(q('v4Store:context'),{token,messageId:'inspect-duplicate',text:''})).state.reminders).toHaveLength(1);
+});

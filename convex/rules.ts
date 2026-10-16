@@ -17,6 +17,14 @@ export function resolveDate(phrase: string | null, now: number, timezone: string
   if (p&&/^this (?:morning|afternoon|evening|night)$/.test(p)) return today;
   if (p&&/^yesterday (?:morning|afternoon|evening|night)$/.test(p)) return shiftDate(today,-1);
   if (p === 'yesterday') return shiftDate(today, -1);
+  // A user may give both today and its explicit date. Accept only agreement;
+  // keep contradictory dates unresolved rather than shifting a reminder.
+  const labelledToday=p?.match(/^today(?:\s*,\s*|\s+)(.+)$/);
+  if(labelledToday){
+    if(!/\b\d{4}$/.test(labelledToday[1])||/\btoday\b/.test(labelledToday[1]))return null;
+    const explicit=resolveDate(labelledToday[1],now,timezone);
+    return explicit===today?explicit:null;
+  }
   const ago = p?.match(/^(\d{1,3}) days? ago$/);
   if (ago) return shiftDate(today, -Number(ago[1]));
   // A named month plus an explicit four-digit year is unambiguous.
