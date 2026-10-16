@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as acquisitionRules from "../acquisitionRules.js";
+import type * as checkoutPresentation from "../checkoutPresentation.js";
 import type * as commandRoute from "../commandRoute.js";
 import type * as commands from "../commands.js";
 import type * as conversationAction from "../conversationAction.js";
@@ -45,7 +47,9 @@ import type * as operatorPhoneGate from "../operatorPhoneGate.js";
 import type * as operatorPhoneSetup from "../operatorPhoneSetup.js";
 import type * as phoneUsers from "../phoneUsers.js";
 import type * as pilotAccess from "../pilotAccess.js";
+import type * as pilotAcquisition from "../pilotAcquisition.js";
 import type * as pilotCoupon from "../pilotCoupon.js";
+import type * as pilotCouponCampaigns from "../pilotCouponCampaigns.js";
 import type * as pilotExperiences from "../pilotExperiences.js";
 import type * as pilotGateway from "../pilotGateway.js";
 import type * as pilotHttp from "../pilotHttp.js";
@@ -60,8 +64,11 @@ import type * as pilotReminderRules from "../pilotReminderRules.js";
 import type * as pilotReminders from "../pilotReminders.js";
 import type * as pilotSocial from "../pilotSocial.js";
 import type * as pilotSummary from "../pilotSummary.js";
+import type * as pilotTestArchive from "../pilotTestArchive.js";
+import type * as pilotTrial from "../pilotTrial.js";
 import type * as pilotWelcome from "../pilotWelcome.js";
 import type * as plans from "../plans.js";
+import type * as progressCheckins from "../progressCheckins.js";
 import type * as qaAction from "../qaAction.js";
 import type * as qaChecks from "../qaChecks.js";
 import type * as qaJudge from "../qaJudge.js";
@@ -78,7 +85,9 @@ import type * as trackedChoice from "../trackedChoice.js";
 import type * as tracking from "../tracking.js";
 import type * as usageLimits from "../usageLimits.js";
 import type * as v4Action from "../v4Action.js";
+import type * as v4FoodDate from "../v4FoodDate.js";
 import type * as v4Instructions from "../v4Instructions.js";
+import type * as v4Language from "../v4Language.js";
 import type * as v4Projection from "../v4Projection.js";
 import type * as v4Reply from "../v4Reply.js";
 import type * as v4Store from "../v4Store.js";
@@ -98,6 +107,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  acquisitionRules: typeof acquisitionRules;
+  checkoutPresentation: typeof checkoutPresentation;
   commandRoute: typeof commandRoute;
   commands: typeof commands;
   conversationAction: typeof conversationAction;
@@ -135,7 +146,9 @@ declare const fullApi: ApiFromModules<{
   operatorPhoneSetup: typeof operatorPhoneSetup;
   phoneUsers: typeof phoneUsers;
   pilotAccess: typeof pilotAccess;
+  pilotAcquisition: typeof pilotAcquisition;
   pilotCoupon: typeof pilotCoupon;
+  pilotCouponCampaigns: typeof pilotCouponCampaigns;
   pilotExperiences: typeof pilotExperiences;
   pilotGateway: typeof pilotGateway;
   pilotHttp: typeof pilotHttp;
@@ -150,8 +163,11 @@ declare const fullApi: ApiFromModules<{
   pilotReminders: typeof pilotReminders;
   pilotSocial: typeof pilotSocial;
   pilotSummary: typeof pilotSummary;
+  pilotTestArchive: typeof pilotTestArchive;
+  pilotTrial: typeof pilotTrial;
   pilotWelcome: typeof pilotWelcome;
   plans: typeof plans;
+  progressCheckins: typeof progressCheckins;
   qaAction: typeof qaAction;
   qaChecks: typeof qaChecks;
   qaJudge: typeof qaJudge;
@@ -168,7 +184,9 @@ declare const fullApi: ApiFromModules<{
   tracking: typeof tracking;
   usageLimits: typeof usageLimits;
   v4Action: typeof v4Action;
+  v4FoodDate: typeof v4FoodDate;
   v4Instructions: typeof v4Instructions;
+  v4Language: typeof v4Language;
   v4Projection: typeof v4Projection;
   v4Reply: typeof v4Reply;
   v4Store: typeof v4Store;
