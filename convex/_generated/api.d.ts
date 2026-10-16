@@ -89,6 +89,7 @@ import type * as v4FoodDate from "../v4FoodDate.js";
 import type * as v4Instructions from "../v4Instructions.js";
 import type * as v4Language from "../v4Language.js";
 import type * as v4Projection from "../v4Projection.js";
+import type * as v4ReminderContext from "../v4ReminderContext.js";
 import type * as v4Reply from "../v4Reply.js";
 import type * as v4Store from "../v4Store.js";
 import type * as verificationBarrier from "../verificationBarrier.js";
@@ -188,6 +189,7 @@ declare const fullApi: ApiFromModules<{
   v4Instructions: typeof v4Instructions;
   v4Language: typeof v4Language;
   v4Projection: typeof v4Projection;
+  v4ReminderContext: typeof v4ReminderContext;
   v4Reply: typeof v4Reply;
   v4Store: typeof v4Store;
   verificationBarrier: typeof verificationBarrier;

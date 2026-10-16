@@ -1,0 +1,3 @@
+# Repair checkpoint
+
+- 16 October 2026: Prepared, not deployed, a narrow one-off workout reminder continuation repair. Owned adjacent purpose clarification retains its original request and receipt-based day/time; repeated clock answers no longer lose the reminder link or trigger session-time validation. 1,297 automated checks passed with one optional skip; frontend/backend types and build passed; two actual-AI fictional cases scheduled exactly one tomorrow 07:00 reminder with simulated transport. Original production exception was not retained; no customer replay/reset/send, production configuration, ads, access clocks or deployment changed. Separate earlier multi-reminder failure and real-phone delivery remain unverified.

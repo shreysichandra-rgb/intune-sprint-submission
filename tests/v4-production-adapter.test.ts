@@ -445,3 +445,15 @@ test('unpaid Hindi explanation guides the enabled trial without granting access 
  expect(r.outcome).toBe('conversation');expect(r.message).toContain('Join');expect(r.message).toContain('24');expect(r.message).not.toContain('Nothing new was saved');expect(generate).not.toHaveBeenCalled();
  const c=await t.query(q('v4Store:context'),{token,messageId:'inspect',text:''});expect(c.state.access.mode).toBe('unpaid');expect(c.state.records).toEqual([]);
 });
+
+test('workout purpose clarification followed by a repeated clock schedules once from the original request (simulated AI)',async()=>{
+ const {t,token,send}=await setup();vi.stubEnv('INTUNE_SYNTHETIC_TRANSPORT','1');vi.stubEnv('WHATSAPP_ACCESS_TOKEN','synthetic');vi.stubEnv('WHATSAPP_PHONE_NUMBER_ID','fictional');
+ vi.stubEnv('INTUNE_LAB_ENABLED','1');generate.mockImplementation(async(_c:any,_u:any,o:any)=>{const p=JSON.parse(o.prompt);return {text:JSON.stringify(p.task?.startsWith('Respond with')||p.task?.startsWith('Return JSON only {reply:string}')?{reply:p.proposal?.reply??p.reply??'Your workout reminder is set for tomorrow at 7 am.'}:{complete:true,missing:[]})};});const request='Remind me of my workout at 7 am tomorrow';
+ const first=await send(request,{introduced:true,reply:'What kind of workout should I remind you about?',clarification:'What kind of workout should I remind you about?',actions:[],tasks:[{id:'purpose',sourceMessageId:'workout-request',topic:'conversation clarification',question:'What kind of workout should I remind you about?'}]},'workout-request');expect(first.outcome).toBe('conversation');
+ const second=await send('Mobility and stretching',{introduced:true,reply:'What time should I remind you tomorrow?',clarification:'What time should I remind you tomorrow?',actions:[{type:'save',kind:'task',label:'Mobility and stretching',text:'Mobility and stretching',evidence:'Mobility and stretching'}],tasks:[{id:'clock',sourceMessageId:'workout-detail',topic:'conversation clarification',question:'What time should I remind you tomorrow?'}]},'workout-detail');expect(second.outcome).toBe('conversation');
+ const third=await send('7 am',{introduced:true,reply:'Which day?',actions:[],tasks:[]},'workout-clock');expect(third.outcome,JSON.stringify(third)).toBe('conversation');
+ const c=await t.query(q('v4Store:context'),{token,messageId:'peek-workout',text:'show'});
+ expect(c.state.records).toHaveLength(1);expect(c.state.tasks).toEqual([]);expect(c.state.reminders).toHaveLength(1);expect(c.state.reminders[0]).toMatchObject({title:'Mobility and stretching',dueAt:Date.parse('2026-10-12T01:30:00Z'),time:'07:00',permission:request});
+ expect((await t.action(api.messages.send,{token,messageId:'workout-clock',text:'7 am'})).outcome).toBe('provider_duplicate');
+ expect((await t.query(q('v4Store:context'),{token,messageId:'peek-again',text:'show'})).state.reminders).toHaveLength(1);
+});
