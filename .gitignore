@@ -1,0 +1,11 @@
+node_modules/
+.env*
+!.env.example
+dist/
+.convex/
+output/
+playwright-report/
+test-results/
+.DS_Store
+
+/node_modules

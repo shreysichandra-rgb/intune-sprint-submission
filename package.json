@@ -1,0 +1,50 @@
+{
+  "name": "build-sprint-app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && node scripts/publish-pilot-home.mjs",
+    "test": "vitest run",
+    "test:cases": "tsx scripts/run-cases.ts",
+    "dev:backend": "convex dev",
+    "deploy": "npx @convex-dev/static-hosting deploy",
+    "prototype:replay": "vitest run tests/conversation-prototype.test.ts",
+    "prototype:actual": "python3 scripts/run-actual-model.py",
+    "pilot:test-user": "node scripts/pilot-test-user.mjs",
+    "pilot:reset": "node scripts/pilot-reset.mjs",
+    "lab:web": "vite --host 127.0.0.1 --port 3333 --strictPort",
+    "lab:setup": "node scripts/setup-conversation-lab.mjs",
+    "lab:build": "vite build --config lab.vite.config.ts",
+    "lab:backend": "node scripts/lab-backend.mjs",
+    "lab:evaluate": "node scripts/evaluate-conversation-lab.mjs",
+    "qa:run": "node scripts/run-conversation-qa.mjs",
+    "pretest": "node scripts/prepare-test-output.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.83",
+    "@convex-dev/agent": "^0.7.3",
+    "@convex-dev/static-hosting": "^0.2.1",
+    "ai": "^7.0.127",
+    "convex": "^1.46.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "convex-test": "^0.0.60",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}

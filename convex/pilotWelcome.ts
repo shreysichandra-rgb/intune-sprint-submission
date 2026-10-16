@@ -1,0 +1,12 @@
+import {TRIAL_WELCOME} from './pilotTrial';
+import {v} from 'convex/values';
+import {makeFunctionReference as ref} from 'convex/server';
+import {pilotUser,accessFor} from './pilotAccess';
+import {internalAction,internalQuery} from './_generated/server';
+import {V4_WELCOME,V4_FIRST_ACTION} from './v4Reply';
+export const WELCOME=V4_WELCOME;
+export const send=internalAction({args:{id:v.id('pilotEntitlements')},returns:v.null(),handler:async(ctx,a)=>{if(!process.env.WHATSAPP_ACCESS_TOKEN||!process.env.WHATSAPP_PHONE_NUMBER_ID)return null;const c:any=await ctx.runQuery(ref<'query'>('pilotAccess:welcomeContext'),a);if(!c)return null;const id=await ctx.runMutation(ref<'mutation'>('whatsappDelivery:enqueue'),{token:c.token,messageId:'pilot-welcome:'+a.id,result:{outcome:'greeting',controlOnly:true,message:c.source==='trial'?TRIAL_WELCOME:WELCOME,welcomeGrant:a.id}});if(id)await ctx.runAction(ref<'action'>('whatsappDelivery:deliver'),{id});return null;}});
+
+export const periodConfirmation=internalAction({args:{id:v.id('pilotEntitlements')},returns:v.null(),handler:async(ctx,a)=>{const info:any=await ctx.runQuery(ref<'query'>('pilotAccess:periodContext'),a);if(!info||info.source==='trial')return null;const date=(at:number)=>new Intl.DateTimeFormat('en-IN',{timeZone:info.timezone,dateStyle:'medium',timeStyle:'short'}).format(at);const zone=info.timezone==='Asia/Kolkata'?'India time':info.timezone;const body=`Your seven days have started. Your pilot ends on ${date(info.endsAt)} (${zone}).\n\nAfter that, new updates and reminders stop. You can still ask for saved records, correct them or request deletion. Records stay until you ask me to forget or delete them.\n\n${V4_FIRST_ACTION}`;const id=await ctx.runMutation(ref<'mutation'>('whatsappDelivery:enqueue'),{token:info.token,messageId:'pilot-period:'+a.id,result:{outcome:'pilot_period',controlOnly:true,message:body}});if(id)await ctx.runAction(ref<'action'>('whatsappDelivery:deliver'),{id});return null;}});
+
+export const greeting=internalQuery({args:{token:v.string()},returns:v.any(),handler:async(ctx,a)=>{const u=await pilotUser(ctx,a.token);const access=await accessFor(ctx,u);if(access.state!=='eligible'||!u.phoneNumber||u.dataDeletedAt||u.state==='stopped'||u.state==='paused'||u.safetyKind)return null;return {outcome:'greeting',controlOnly:true,message:access.source==='trial'?TRIAL_WELCOME:WELCOME,welcomeGrant:access.id};}});

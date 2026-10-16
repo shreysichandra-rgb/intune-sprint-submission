@@ -1,0 +1,32 @@
+import {test,expect,vi,afterEach} from 'vitest';
+import {convexTest} from 'convex-test';
+import schema from '../convex/schema';
+import {api,internal} from '../convex/_generated/api';
+const generateObject=vi.hoisted(()=>vi.fn());
+vi.mock('@convex-dev/agent',()=>({Agent:class{generateObject=generateObject;}}));
+const modules=import.meta.glob('../convex/**/*.*s');
+const meaning={intent:'record',trackedItem:'brain fog',count:1,datePhrase:'today',timePhrase:null,precision:'date-only',target:null,explicitNew:false};
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllEnvs();generateObject.mockReset();});
+test('Stop blocks capture without an AI key or quota, Start alone renews and keeps old history',async()=>{
+ vi.stubEnv('OPENAI_API_KEY','test-placeholder');generateObject.mockResolvedValue({object:meaning});
+ const t=convexTest(schema,modules);const pair=await t.mutation(api.tracking.createTestPair,{});
+ const send=(id:string,text:string)=>t.action(api.messages.send,{token:pair.A,messageId:id,text});
+ const first=await send('first','Brain fog today');const oldJob=first.view.user.jobId;
+ await send('stop','Stop');vi.stubEnv('OPENAI_API_KEY','');
+ const blocked=await send('blocked','Brain fog today');expect(blocked.outcome).toBe('stopped');expect(blocked.message).toContain('Start');expect(blocked.view.records).toEqual(first.view.records);
+ await send('resume','Resume');expect((await t.query(api.tracking.getSummary,{token:pair.A})).user.state).toBe('stopped');
+ const renewed=await send('start','sTaRt');expect(renewed.view.user.jobId).not.toBe(oldJob);expect(renewed.view.records).toEqual(first.view.records);expect(renewed.view.sevenDayCount).toBe(0);
+ vi.stubEnv('OPENAI_API_KEY','test-placeholder');const next=await send('next','Brain fog today');expect(next.outcome).toBe('stored');expect(next.view.sevenDayCount).toBe(1);expect(next.view.totalStored).toBe(2);expect(next.view.records[1].jobId).not.toBe(oldJob);expect(generateObject).toHaveBeenCalledTimes(2);
+ await send('stop-again','Stop');await send('start','Start');expect((await t.query(api.tracking.getSummary,{token:pair.A})).user.state).toBe('stopped');
+});
+test('legacy stopped user and direct apply cannot add occurrences; unresolved old job cannot become a new job occurrence',async()=>{
+ const t=convexTest(schema,modules);const pair=await t.mutation(api.tracking.createTestPair,{});
+ await t.mutation(internal.tracking.reserve,{token:pair.A,messageId:'pending'});
+ const pending=await t.mutation(internal.tracking.apply,{token:pair.A,messageId:'pending',text:'Brain fog',meaning:{...meaning,datePhrase:null}});
+ await t.run(async ctx=>{const u=await ctx.db.query('users').withIndex('by_token',q=>q.eq('token',pair.A)).unique();await ctx.db.patch(u!._id,{state:'stopped'});});
+ await t.mutation(internal.tracking.reserve,{token:pair.A,messageId:'direct'});
+ const direct=await t.mutation(internal.tracking.apply,{token:pair.A,messageId:'direct',text:'Brain fog today',meaning});expect(direct.outcome).toBe('stopped');expect(direct.view.records).toEqual([]);
+ const stopped=await t.mutation(api.tracking.resolvePending,{token:pair.A,pendingId:pending.pendingId,choice:'clarify',datePhrase:'today'});expect(stopped.outcome).toBe('stopped');
+ await t.action(api.messages.send,{token:pair.A,messageId:'start',text:'Start'});
+ const old=await t.mutation(api.tracking.resolvePending,{token:pair.A,pendingId:pending.pendingId,choice:'clarify',datePhrase:'today'});expect(old.outcome).toBe('stopped');expect(old.view.records).toEqual([]);
+});

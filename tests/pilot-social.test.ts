@@ -1,0 +1,29 @@
+import {test,expect,vi,beforeEach,afterEach} from 'vitest';
+import {convexTest} from 'convex-test';
+import {makeFunctionReference as ref} from 'convex/server';
+import schema from '../convex/schema';
+import {api,internal} from '../convex/_generated/api';
+import {socialIntent} from '../convex/pilotSocial';
+const generate=vi.hoisted(()=>vi.fn());vi.mock('@convex-dev/agent',()=>({Agent:class{generateObject=generate;}}));
+const modules=import.meta.glob('../convex/**/*.*s'),now=Date.parse('2026-10-10T03:00:00Z');
+beforeEach(()=>{for(const [k,v] of Object.entries({INTUNE_PILOT_MODE:'v3',INTUNE_CONVERSATION_GATE:'candidate',INTUNE_CONVERSATION_ROLLOUT:'all',INTUNE_DIRECT_TRACKING:'1',INTUNE_SEMANTIC_BRIDGE:'legacy',OPENAI_API_KEY:'fictional'}))vi.stubEnv(k,v);vi.spyOn(Date,'now').mockReturnValue(now);generate.mockReset();});
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllEnvs();});
+async function fixture(paid=true){const t=convexTest(schema,modules),phoneNumber='+12025550165',token=await t.mutation(internal.phoneUsers.getOrCreate,{phoneNumber});if(paid){const g:any=await t.mutation(ref('pilotAccess:grantTest'),{token,grantKey:'fictional-social'});await t.mutation(ref('pilotAccess:welcomeAccepted'),{grantId:g.id,providerMessageId:'wamid.social'});await t.mutation(ref('pilotAccess:welcomeDelivered'),{providerMessageId:'wamid.social',recipient:phoneNumber.slice(1),deliveredAt:now});}return {t,token,send:(text:string,messageId=crypto.randomUUID())=>t.action(api.messages.send,{token,text,messageId}),user:()=>t.run(c=>c.db.query('users').withIndex('by_token',q=>q.eq('token',token)).unique())};}
+test('complete casual entry leads to tracking, without a false occurrence, name or permission loop',async()=>{
+ const f=await fixture(),before:any=await f.t.query(ref('pilotAccess:status'),{token:f.token});
+ const inputs=['Hello how are you','Nothing much','What can u do','Okay','Can we start','Yes let’s begin'];
+ const replies=[];for(const text of inputs)replies.push((await f.send(text)).message);
+ expect(replies[0]).toContain('What would you like a hand remembering first?');expect(replies[0]).not.toMatch(/call you|your name/i);
+ expect(replies[2]).toContain('grocery list');expect(replies[2]).toContain('Automatic reminders aren’t available yet');
+ for(const i of [1,2,3,4,5])expect(replies[i]).toMatch(/What would you like me to keep track of(?: first)?\?/);
+ for(const reply of replies){expect(reply).not.toContain('new occurrence');expect(reply).not.toContain('No additional responsibilities');expect(reply).not.toContain('May I save');expect(reply.match(/\?/g)).toHaveLength(1);}
+ const u=await f.user();expect(u!.preferredName).toBeUndefined();expect(u!.conversationConsent).toBeUndefined();
+ expect(await f.t.query(ref('pilotAccess:status'),{token:f.token})).toEqual(before);
+ expect(generate).not.toHaveBeenCalled();
+ const q='Please track my plan: swimming twice this week';generate.mockResolvedValueOnce({object:{v:2,ops:[{k:'plan',q,activity:'swimming',n:2}]}});
+ expect((await f.send(q)).message).toContain('Plan saved');expect((await f.user())!.conversationConsent).toBe(true);
+});
+test('returning greeting uses V3 invitation and duplicate social turns make no duplicate changes',async()=>{const f=await fixture();await f.t.run(async c=>{const u=(await c.db.query('users').withIndex('by_token',q=>q.eq('token',f.token)).unique())!;await c.db.patch(u._id,{preferredName:'Noor',pilotNameAsked:false,conversationConsent:true});});const r=await f.send('Hey what’s up','same-message');expect(r.message).toContain('Hi Noor');expect(r.message).not.toContain('What’s going on');const after=await f.user();expect((await f.send('Hey what’s up','same-message')).outcome).toBe('provider_duplicate');expect(await f.user()).toEqual(after);expect((await f.send('Ok')).message).toBe('Okay.');});
+test.each(['Hi, I had a hot flash today','Let’s start tracking swimming twice a week','Okay, physio done yesterday','You tell me if this pain is normal','Pause','Stop','Delete my pilot data','done','the second one'])('mixed facts, medical questions and controls keep normal routes: %s',text=>expect(socialIntent(text)).toBeNull());
+test('acknowledgement cannot swallow a pending answer; help retains the draft but does not confirm it',async()=>{const f=await fixture();await f.t.run(async c=>{const u=(await c.db.query('users').withIndex('by_token',q=>q.eq('token',f.token)).unique())!;const id=await c.db.insert('pending',{userId:u._id,jobId:u.jobId,rawText:'fictional detail',messageReceivedAt:now,reason:'Which day?',kind:'clarification',proposal:{v:2,mode:'detail',ops:[]},relatedIds:[]});await c.db.patch(u._id,{conversationQuestionId:id,conversationConsent:true,pilotNameAsked:false});});const u=await f.user();await f.t.mutation(internal.tracking.receive,{token:f.token,messageId:'pending-ok'});expect(await f.t.mutation(ref('pilotSocial:reply'),{token:f.token,messageId:'pending-ok',text:'Ok'})).toBeNull();await f.send('what can u do');expect((await f.user())!.conversationQuestionId).toBeUndefined();expect(await f.t.run(c=>c.db.get(u!.conversationQuestionId as any))).not.toBeNull();});
+test('unpaid or expired access stays blocked and social handling never reopens paused or safety state',async()=>{const f=await fixture(false);expect((await f.send('Hello')).message).toContain('₹99');const p=await fixture();for(const fields of [{state:'paused' as const},{state:'active' as const,safetyKind:'mental' as const}]){await p.t.run(async c=>{const u=(await c.db.query('users').withIndex('by_token',q=>q.eq('token',p.token)).unique())!;await c.db.patch(u._id,fields);});await p.t.mutation(internal.tracking.receive,{token:p.token,messageId:fields.state});expect(await p.t.mutation(ref('pilotSocial:reply'),{token:p.token,messageId:fields.state,text:'let’s start'})).toBeNull();}vi.mocked(Date.now).mockReturnValue(now+604800000);expect((await p.send('Hello')).message).toContain('ended');});

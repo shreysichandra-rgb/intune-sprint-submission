@@ -1,0 +1,9 @@
+// Restart only this experiment's loopback Convex service. Never reads production configuration.
+import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {spawn} from 'node:child_process';
+const root=path.resolve(import.meta.dirname,'..'),dir=path.join(root,'.convex/lab'),file=path.join(dir,'config.json');
+try{const r=await fetch('http://127.0.0.1:3330/version');if(r.ok){console.log('Local lab backend is already running on 3330.');process.exit(0);}}catch{}
+if(!fs.existsSync(file))throw Error('This machine needs initial local Convex lab setup; no production configuration will be used.');
+const c=JSON.parse(fs.readFileSync(file,'utf8')),cache=path.join(os.homedir(),'.cache/convex/binaries');const folders=fs.existsSync(cache)?fs.readdirSync(cache).sort().reverse():[];const binary=process.env.INTUNE_LAB_BACKEND_BINARY??folders.map(f=>path.join(cache,f,'convex-local-backend')).find(f=>fs.existsSync(f));if(!binary)throw Error('Local Convex backend binary is missing.');
+if(c.ports.cloud!==3330||c.ports.site!==3331||c.deploymentName!=='intune-conversation-lab')throw Error('Unexpected configuration: refusing to start another backend.');
+const log=fs.openSync(path.join(dir,'backend.private.log'),'a',0o600);const p=spawn(binary,['--interface','127.0.0.1','--port','3330','--site-proxy-port','3331','--instance-name',c.deploymentName,'--instance-secret',c.instanceSecret,'--local-storage',path.join(dir,'convex_local_storage'),'--disable-beacon',path.join(dir,'convex_local_backend.sqlite3')],{detached:true,stdio:['ignore',log,log]});p.unref();fs.closeSync(log);fs.writeFileSync(path.join(dir,'backend.pid'),String(p.pid),{mode:0o600});
+for(let n=0;n<40;n++){try{if((await fetch('http://127.0.0.1:3330/version')).ok){console.log('Local lab backend started on 3330. Production unchanged.');process.exit(0);}}catch{}await new Promise(r=>setTimeout(r,300));}throw Error('Local backend did not start. See .convex/lab/backend.private.log.');

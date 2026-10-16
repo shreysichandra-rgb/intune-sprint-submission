@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {renderMarketingPage} from './marketing-page.mjs';
+const source=readFileSync(new URL('../public/pilot/index.html',import.meta.url),'utf8');
+test('preview cannot open checkout',()=>{const p=renderMarketingPage(source);assert.match(p,/noindex,nofollow/);assert.match(p,/id="begin" href="#pilot"/);assert.doesNotMatch(p,/__INTUNE_CHAT_URL__/)});
+test('production uses validated business chat and retains offer and limits',()=>{const p=renderMarketingPage(source,{production:true,chatUrl:'https://wa.me/12025550193'});assert.match(p,/href="https:\/\/wa.me\/12025550193\?text=Join"/);assert.match(p,/₹99/);assert.doesNotMatch(p,/automatic renewal/);assert.match(p,/₹99 for 7 days/);assert.match(p,/Reminders are currently unavailable/);assert.match(p,/confirmed delivered/);assert.doesNotMatch(p,/noindex|__INTUNE_CHAT_URL__|Compare designs|preview-bar/)});
+for(const chatUrl of ['', 'https://wa.me.evil.example/12025550193','javascript:alert(1)','https://wa.me/12025550193?token=private'])test('reject unsafe destination '+JSON.stringify(chatUrl),()=>assert.throws(()=>renderMarketingPage(source,{production:true,chatUrl})));
+test('changed joining placeholder fails closed',()=>assert.throws(()=>renderMarketingPage(source.replaceAll('__INTUNE_CHAT_URL__','changed'),{production:true,chatUrl:'https://wa.me/12025550193'})));
+test('both public joining actions resolve to the verified business destination',()=>{const p=renderMarketingPage(source,{production:true,chatUrl:'https://wa.me/12025550193'});assert.equal((p.match(/href="https:\/\/wa.me\/12025550193\?text=Join"/g)||[]).length,2);assert.doesNotMatch(p,/__INTUNE_CHAT_URL__/)});

@@ -1,0 +1,63 @@
+import {expect,test} from 'vitest';
+import {preserveV4Introduction,preserveV4Question,explainUnavailableReminders,V4_WELCOME,preserveTasksOnProfileUpdate,mergeNewTurnTasks,focusV4Question,confirmationRecords} from '../convex/v4Reply';
+test('verified confirmation retains first-contact introduction when rewritten',()=>{expect(preserveV4Introduction('Got it, your physio and swimming plans are saved.','Hi, I’m InTune 👋 I help keep your health plans organised. Your plans are ready.',true)).toContain('Got it, your physio and swimming plans are saved.');});
+test('returning replies and already introduced confirmations do not repeat welcome',()=>{expect(preserveV4Introduction('Got it.','Hi, I’m InTune.',false)).toBe('Got it.');expect(preserveV4Introduction('Hi, I’m InTune. Got it.','Hi, I’m InTune.',true)).not.toContain('founder');});
+test('missing welcome recovers product introduction without inventing health facts',()=>{const result=preserveV4Introduction('Got it.','Got it.',true);expect(result).toContain('InTune');expect(result).toContain('Text only');expect(result).toContain('delete');expect(result).not.toContain('founder');expect(result.endsWith('Got it.')).toBe(true);});
+
+test('reply rewriting cannot replace the pending completion question',()=>{expect(preserveV4Question('Got it. What would you like help with next?','Did you complete physio or swimming?')).toBe('Got it. Did you complete physio or swimming?');expect(preserveV4Question('Did you complete physio or swimming?','Did you complete physio or swimming?')).toBe('Did you complete physio or swimming?');expect(preserveV4Question('Hello.',null)).toBe('Hello.');expect(preserveV4Question('Corrected to yesterday. Was that right?',null)).toBe('Corrected to yesterday.');});
+
+test('equivalent unavailable-reminder explanations are not duplicated',()=>{for(const reply of ['Reminder delivery isn’t available right now.','Automatic reminders are not configured yet.','I cannot send reminders yet.'])expect(explainUnavailableReminders(reply)).toBe(reply);expect(explainUnavailableReminders('Kept your plan.')).toBe('Kept your plan. Automatic reminders aren’t available yet.');});
+
+ test('removes repeated reminder capability sentences without dropping saved details',()=>{
+  const result=explainUnavailableReminders('Kept your physio plan. Automatic reminders aren’t available yet. Automatic reminders aren’t available yet. Your apples remain on the list.');
+  expect(result).toBe('Kept your physio plan. Automatic reminders aren’t available yet. Your apples remain on the list.');
+ });
+
+test('welcome explains a useful next step without founder-review copy or a second greeting',()=>{expect(V4_WELCOME).toContain('grocery list');expect(V4_WELCOME).not.toMatch(/call you|skip this|\?/i);expect(V4_WELCOME).not.toMatch(/founder|review|personal AI/i);expect(preserveV4Introduction('Hi!','Hi!',true)).not.toMatch(/Hi!$/);expect(preserveV4Introduction(V4_WELCOME+' Hi!',V4_WELCOME,true)).toBe(V4_WELCOME);});
+
+test('delivered paid introduction defers its action question until after activation',async()=>{const {WELCOME}=await import('../convex/pilotWelcome');expect(WELCOME).toBe(V4_WELCOME);expect(WELCOME).not.toContain('founder');});
+
+test('text-only spelling does not cause another introduction',()=>{const reply='Hi, I’m InTune. I keep health plans during perimenopause, including a grocery list. It is text-only. Details stay until you ask me to delete them. What would you like me to call you?';expect(preserveV4Introduction(reply,reply,true)).toBe(reply);});
+
+test('canonical welcome does not append another greeting before its question',()=>{const reply=preserveV4Introduction('Hi! What would you like me to call you?','',true);expect(reply).not.toContain('\n\nHi!');expect(reply.endsWith('What would you like me to call you?')).toBe(true);});
+
+test('profile-only update retains unrelated unfinished health questions without displaying them',()=>{const stock={id:'stock:m1',topic:'grocery stock',question:'Which foods are at home?',sourceMessageId:'m1',targetId:null};const name={id:'name:m2',topic:'name',question:'What should I call you?',sourceMessageId:'m2',targetId:null};expect(preserveTasksOnProfileUpdate([stock,name],[],[{type:'profile'}])).toEqual([{...stock,question:null}]);expect(preserveTasksOnProfileUpdate([stock],[],[{type:'correct'}])).toEqual([]);});
+
+test('profile update keeps a missing medicine-name question',()=>{const task={id:'medicine:m1',topic:'medicine clarification',question:'What is the medicine name?',sourceMessageId:'m1',targetId:null};expect(preserveTasksOnProfileUpdate([task],[],[{type:'profile'}])).toEqual([{...task,question:null}]);});
+
+test('same-message batching preserves new topic questions but does not resurrect earlier answered tasks',()=>{const topic={id:'meal',topic:'meal plan details',sourceMessageId:'m2',question:'What is your meal plan?'};const old={id:'old',topic:'old question',sourceMessageId:'m1',question:'Old?'};expect(mergeNewTurnTasks([{tasks:[topic,old]},{tasks:[]}],[],'m2')).toEqual([topic]);expect(mergeNewTurnTasks([{tasks:[topic]}],[topic],'m2')).toHaveLength(1);});
+
+test('multiple pending topics get one concrete question without duplicating a combined clarification',()=>{const p={reply:'What is your meal plan and workout?',clarification:'What is your meal plan and workout?',open_tasks:[{id:'meal',sourceMessageId:'m1',topic:'meal',question:'What is your meal plan?'},{id:'workout',sourceMessageId:'m1',topic:'workout',question:'What workouts do you do?'},{id:'clarify:m1',sourceMessageId:'m1',topic:'conversation clarification',question:'What is your meal plan and workout?'}]};focusV4Question(p,'m1');expect(p.reply).toBe('What is your meal plan?');expect(p.open_tasks).toHaveLength(2);expect(p.open_tasks[1].question).toBeNull();});
+
+test('confirmation context keeps changed and referenced records without unrelated history',()=>{const food={id:'food',label:'food plan',parentId:null},paneer={id:'g1',label:'paneer',parentId:'food'},old={id:'old',label:'unrelated history',parentId:null},fresh={id:'new',label:'curd',parentId:'food'};const before=[food,paneer,old],after=[...before,fresh];expect(confirmationRecords(before,after,[{type:'correct',targetId:'g1'}],'I have paneer','Changed paneer')).toEqual([food,paneer,fresh]);expect(confirmationRecords(before,after,[{type:'retrieve',targetId:null}],'show all','')).toEqual(after);});
+
+test('a welcome missing perimenopause recovers the complete approved introduction',()=>{expect(preserveV4Introduction('Hi, I’m InTune. I help organise health plans. Text only; details stay until you delete them. What would you like me to call you?','',true)).toContain('during perimenopause');});
+
+test('substantive grocery saving retires optional name while retaining a separate stock question',async()=>{const {retireV4OptionalName}=await import('../convex/v4Reply');const p={reply:'I am InTune. What would you like me to call you?',clarification:'What would you like me to call you?',actions:[{type:'save',kind:'grocery'}],open_tasks:[{id:'name',topic:'name',question:'What would you like me to call you?'},{id:'stock',topic:'grocery stock',question:null}]};retireV4OptionalName(p);expect(p.clarification).toBeNull();expect(p.reply).not.toContain('call you');expect(p.open_tasks.map(t=>t.id)).toEqual(['stock']);});
+
+test('optional naming is about the woman and its invitation appears once',async()=>{const {normalizeV4NameQuestion}=await import('../convex/v4Reply');const p={safety:{intent:'none'},actions:[],clarification:'What would you like to call me?',reply:'You can also send a plan instead. What would you like to call me? You can also send a plan instead.',open_tasks:[{question:'What would you like to call me?'}]};normalizeV4NameQuestion(p,true);expect(p.clarification).toBe('What would you like me to call you?');expect(p.reply.match(/send your plan instead/g)).toHaveLength(1);expect(p.reply).not.toContain('call me?');});
+
+test('a backend date question with explanatory sentence appears once',()=>{const q='Which day should I remind you? Please include the date or tomorrow.';expect(preserveV4Question(q+' '+q,q)).toBe(q);});
+
+test('known grocery stock retires its answered question without losing unrelated work',async()=>{const {retireV4ResolvedStock}=await import('../convex/v4Reply');const q='Which items are at home?',p={clarification:q,reply:'All bought. '+q,open_tasks:[{id:'stock',sourceMessageId:'food',topic:'grocery stock',question:q},{id:'date',sourceMessageId:'physio',topic:'date',question:null}],actions:[{type:'correct',targetId:'curd',state:'received'},{type:'correct',targetId:'rice',state:'received'}]},records=[{id:'curd',kind:'grocery',sourceMessageId:'food',state:'unchecked'},{id:'rice',kind:'grocery',sourceMessageId:'food',state:'unchecked'}];retireV4ResolvedStock(p,records);expect(p.open_tasks.map(t=>t.id)).toEqual(['date']);expect(p.clarification).toBeNull();expect(p.reply).toBe('All bought.');});
+
+test('whole-account deletion wording does not match negated or item-scoped requests',async()=>{const {matchCommand}=await import('../convex/commandRoute');expect(matchCommand('Please delete all my information.')).toBe('delete');for(const text of ['Do not delete all my information','Delete my physio note','What happens if I delete all my data?','My doctor said delete all my information'])expect(matchCommand(text)).toBeNull();});
+
+test('a fresh grocery confirmation is accurate and does not duplicate unrelated plan setup',async()=>{const {finishV4GroceryReply}=await import('../convex/v4Reply');const q='What days do you go to physio?',old={id:'physio-days',topic:'physio schedule',question:q,sourceMessageId:'earlier'},p={actions:[{type:'save',kind:'grocery',state:'pending',label:'paneer'}],reply:'Paneer is already on your shopping list. '+q,clarification:q,open_tasks:[{...old,question:null},{id:'new-question',topic:'conversation clarification',question:q}]};finishV4GroceryReply(p,[{id:'physio',kind:'plan',label:'physio'}],[old],[{status:'saved'}],false);expect(p.reply).toBe('Added paneer to your shopping list.');expect(p.open_tasks).toEqual([{...old,question:null}]);expect(p.clarification).toBeNull();});
+test('an existing grocery duplicate keeps its accurate already-present wording',async()=>{const {finishV4GroceryReply}=await import('../convex/v4Reply');const p={actions:[{type:'save',kind:'grocery',state:'pending',label:'paneer'}],reply:'Paneer is already on your shopping list.',clarification:null,open_tasks:[]};finishV4GroceryReply(p,[],[],[{status:'duplicate'}],false);expect(p.reply).toContain('already');});
+
+
+test('first useful save may keep one optional name question when no substantive follow-up remains',async()=>{
+ const {retireV4OptionalName}=await import('../convex/v4Reply');
+ const q='What would you like me to call you?',p={reply:'Noted your tiredness this week. '+q,clarification:q,actions:[{type:'save',kind:'experience'}],open_tasks:[{id:'name',topic:'name',question:q}]};
+ retireV4OptionalName(p,true);expect(p.clarification).toBe(q);expect(p.reply).toContain('Noted your tiredness');
+});
+test('first-save optional name cannot displace an independent reminder question',async()=>{
+ const {retireV4OptionalName}=await import('../convex/v4Reply');
+ const q='What would you like me to call you?',p={reply:'Kept your plan. '+q,clarification:q,actions:[{type:'save',kind:'plan'}],open_tasks:[{id:'name',topic:'name',question:q},{id:'reminder',topic:'reminder time',question:null}]};
+ retireV4OptionalName(p,true);expect(p.clarification).toBeNull();expect(p.open_tasks.map(t=>t.id)).toEqual(['reminder']);
+});
+
+test('quoted saved doctor questions survive follow-up question filtering',()=>{const saved='I’ve kept your doctor question: “What should I bring to my appointment?”';expect(preserveV4Question(saved+' What would you like help with next?',null)).toBe(saved);expect(preserveV4Question(saved+' What should I call you?','What would you like me to call you?')).toBe(saved+' What would you like me to call you?');expect(preserveV4Question('Your saved question is "What should I bring?"',null)).toBe('Your saved question is "What should I bring?"');});
+
+test('quoted record text is not treated as a new question to the woman',async()=>{const {lastV4Question}=await import('../convex/v4Reply');expect(lastV4Question('Your doctor question: “What should I bring to my appointment?”')).toBeNull();expect(lastV4Question('Your doctor question: “What should I bring?” What would you like me to call you?')).toBe('What would you like me to call you?');expect(lastV4Question('What time should I remind you?')).toBe('What time should I remind you?');});

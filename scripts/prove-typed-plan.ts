@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {ConvexHttpClient} from 'convex/browser';
+import {api} from '../convex/_generated/api';
+import {chromium} from '@playwright/test';
+const url=fs.readFileSync('.env.local','utf8').match(/^VITE_CONVEX_URL=(.+)$/m)![1];
+const client=new ConvexHttpClient(url);const pair=await client.mutation(api.tracking.createTestPair,{});
+const output:any={devServer:url,steps:[]};
+async function send(user:'A'|'B',input:string){const response=await client.action(api.messages.send,{token:pair[user],messageId:crypto.randomUUID(),text:input});output.steps.push({user,input,response});fs.writeFileSync('/tmp/keeper-typed-plan-partial.json',JSON.stringify(output,null,2));if(response.outcome==='error') console.error(JSON.stringify(response));assert.notEqual(response.outcome,'error',response.message);return response;}
+const draft=await send('A','strength train 3 times this week');assert.equal(draft.outcome,'plan_confirmation');assert.equal(draft.planView.plan,null);
+const confirmed=await client.mutation(api.plans.resolve,{token:pair.A,pendingId:draft.pendingId,choice:'confirm'});output.steps.push({user:'A',input:'Confirm this plan (button)',response:confirmed});assert.equal(confirmed.planView.progress,'0/3');
+const first=await send('A','did my strength session today');assert.equal(first.planView.progress,'1/3');
+const correction=await send('A','that was yesterday');assert.equal(correction.outcome,'plan_corrected');assert.equal(correction.changedIds[0],first.changedIds[0]);assert.equal(correction.planView.records.length,1);
+const second=await send('A','did another strength session today');assert.equal(second.planView.progress,'2/3');
+const third=await send('A','did another strength session today');assert.equal(third.planView.progress,'3/3');
+await send('A','how is my plan going?');const b=await send('B','how is my plan going?');assert.equal(b.outcome,'no_plan');assert.equal(b.planView.plan,null);assert.deepEqual(b.planView.records,[]);
+const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+const page=await browser.newPage({viewport:{width:390,height:844}});await page.addInitScript(pair=>localStorage.setItem('fictional-test-pair',JSON.stringify(pair)),pair);await page.goto('http://127.0.0.1:5174/');await page.getByRole('region',{name:'Plan progress'}).getByText('strength train · 3/3',{exact:true}).waitFor();await page.reload();await page.getByRole('region',{name:'Plan progress'}).getByText('strength train · 3/3',{exact:true}).waitFor();
+const planView=JSON.parse((await page.getByTestId('raw-plan').textContent())!);const bodyChangeView=await client.query(api.tracking.getSummary,{token:pair.A});assert.equal(planView.progress,'3/3');assert.equal(planView.records.length,3);assert.deepEqual(bodyChangeView.records,[]);
+output.afterPageReload={user:'A',url:page.url(),planView,bodyChangeView};
+await page.getByLabel('Act as fictional user').selectOption('B');await page.getByRole('region',{name:'Plan progress'}).getByText('No confirmed plan for this job. Type your existing plan and target above, then confirm the repeat-back.',{exact:true}).waitFor();output.userBPageView=JSON.parse((await page.getByTestId('raw-plan').textContent())!);assert.equal(output.userBPageView.plan,null);assert.deepEqual(output.userBPageView.records,[]);
+await browser.close();fs.writeFileSync('output/typed-plan-dev-raw.json',JSON.stringify(output,null,2)+'\n');console.log(JSON.stringify(output,null,2));
