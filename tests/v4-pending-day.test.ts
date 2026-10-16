@@ -23,3 +23,10 @@ test('a clock answer reuses the already saved reminder date rather than asking f
  const {p,c,a}=fixture();c.now=Date.parse('2026-10-16T07:40:00Z');c.state.records[0]={...c.state.records[0],kind:'task',date:'2026-10-20',time:null} as any;c.sources[0].text='Remind me to prepare my doctor questions';a.text='10 am';
  expect(completeV4ReminderDay(p,c,a)).toBe(true);expect(p.actions[0]).toMatchObject({datePhrase:'2026-10-20',dateSourceRecordId:'walk',timePhrase:'10 am'});
 });
+
+test.each(['6 pm is okay','6 pm is ok','6 pm please'])('clock acknowledgement %s completes only the asked time slot in a multi-reminder source',text=>{
+ const {p,c,a}=fixture();c.now=Date.parse('2026-10-16T09:30:00Z');c.sources[0].text='Remind me to leave in 15 minutes for my class at 4. Set another reminder to review my packing list tonight.';(c.sources[0] as any).at=c.now;c.state.records[0]={...c.state.records[0],kind:'task',date:null,time:null} as any;a.text=text;
+ expect(completeV4ReminderDay(p,c,a)).toBe(true);expect(p.actions).toEqual([expect.objectContaining({type:'correct',targetId:'walk',timePhrase:'6 pm'})]);expect(p.reply).toBe('Which day should I remind you?');expect(p.actions.some((x:any)=>x.type==='reminder')).toBe(false);
+});
+
+ test.each(['6 pm is not okay','6 pm or 8 pm','6 pm for a different task'])('does not strip changed meaning from %s',text=>{const {p,c,a}=fixture();a.text=text;expect(completeV4ReminderDay(p,c,a)).toBe(false);expect(p.actions).toEqual([]);});

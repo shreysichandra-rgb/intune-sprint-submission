@@ -37,7 +37,7 @@ export function completeV4ReminderDay(p:any,c:any,a:any){
  if(!source||source.canSave===false||!/(remind|nudge|check[ -]?in)/i.test(source.text)||/\b(?:daily|weekly|every|each)\b/i.test(source.text)||!target)return false;
  // Only timing-only replies qualify. A changed purpose, recurrence, multiple
  // reminders or a quotation stays with independent interpretation.
- const clean=a.text.trim().replace(/[.!?]+$/,'').replace(/\s+please$/i,'');
+ const clean=a.text.trim().replace(/[.!?]+$/,'').replace(/\s+please$/i,'').replace(/\s+is\s+(?:ok|okay)$/i,'');
  const clockMatch=clean.match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i),clockSpan=clockMatch?.[0]??null;
  let dateSpan=clean.replace(/^(?:yes[ ,]+|ok(?:ay)?[ ,]+)?(?:remind me\s+)?(?:on\s+)?/i,'');
  if(clockSpan)dateSpan=dateSpan.replace(clockSpan,'').replace(/\s*(?:at|,)\s*$/i,'').trim();

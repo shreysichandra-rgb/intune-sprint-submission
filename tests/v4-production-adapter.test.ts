@@ -457,3 +457,14 @@ test('workout purpose clarification followed by a repeated clock schedules once 
  expect((await t.action(api.messages.send,{token,messageId:'workout-clock',text:'7 am'})).outcome).toBe('provider_duplicate');
  expect((await t.query(q('v4Store:context'),{token,messageId:'peek-again',text:'show'})).state.reminders).toHaveLength(1);
 });
+
+test('clock plus acknowledgement fills only the second pending reminder and preserves the first (simulated AI)',async()=>{
+ const {t,token,send}=await setup();vi.stubEnv('INTUNE_SYNTHETIC_TRANSPORT','1');vi.stubEnv('WHATSAPP_ACCESS_TOKEN','synthetic');vi.stubEnv('WHATSAPP_PHONE_NUMBER_ID','fictional');
+ const text='Remind me to leave for class in 15 minutes. Remind me to review my packing list.';
+ expect((await send(text,{introduced:true,reply:'What time should I remind you to review my packing list?',clarification:'What time should I remind you to review my packing list?',actions:[{type:'save',kind:'task',label:'leave for class',evidence:'leave for class',tempId:'first'},{type:'reminder',targetId:'first',timePhrase:'in 15 minutes',evidence:text,permissionEvidence:text,repeat:'once'},{type:'save',kind:'task',label:'review my packing list',evidence:'review my packing list',tempId:'second'}],tasks:[{id:'reminder-pending:second',sourceMessageId:'two-requests',targetId:'second',topic:'packing reminder',question:'What time should I remind you to review my packing list?'}]},'two-requests')).outcome).toBe('conversation');
+ const before=await t.query(q('v4Store:context'),{token,messageId:'peek-first',text:'show'});
+ expect((await send('6 pm is okay',{introduced:true,reply:'What day should I remind you?',actions:[],tasks:[]},'clock-ack')).outcome).toBe('conversation');
+ const after=await t.query(q('v4Store:context'),{token,messageId:'peek-clock',text:'show'});expect(after.state.reminders).toEqual(before.state.reminders);expect(after.state.records.find((r:any)=>r.label==='review my packing list').time).toBe('6 pm');expect(after.state.tasks.some((x:any)=>/Which day/.test(x.question??''))).toBe(true);
+ expect((await send('Tomorrow',{introduced:true,reply:'Checking the reminder.',actions:[],tasks:[]},'packing-day')).outcome).toBe('conversation');
+ const final=await t.query(q('v4Store:context'),{token,messageId:'peek-final',text:'show'});expect(final.state.reminders).toHaveLength(2);expect(final.state.reminders.find((r:any)=>r.id===before.state.reminders[0].id)).toEqual(before.state.reminders[0]);expect(final.state.reminders.find((r:any)=>r.title==='review my packing list')).toMatchObject({time:'18:00',dueAt:Date.parse('2026-10-12T12:30:00Z')});
+});
