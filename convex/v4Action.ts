@@ -105,6 +105,20 @@ export function completeV4ReminderDay(p:any,c:any,a:any){
  p.actions=expandV4({reply:'Checking your reminder.',actions:[{type:'reminder',targetId:target.id,sourceMessageId:a.messageId,evidence:a.text,datePhrase:date,...(!day?{dateSourceRecordId:target.id}:{}),...(clockSpan?{timePhrase:clockSpan}:originalClock?{timePhrase:originalClock,timeSourceMessageId:source.messageId}:{}),permissionEvidence:a.text,repeat:'once'}]},a.messageId,a.text).actions;
  p.open_tasks=p.open_tasks.filter((t:any)=>t.id!==task.id&&!(t.targetId===target.id&&/reminder/i.test(t.topic??'')));p.clarification=null;p.reply='Checking your '+date+' reminder at '+clock+'.';return true;
 }
+/** Recover only a literal clock answer to one owned, already dated reminder.
+ * This is used only after two schema-invalid proposals, never a provider/quota
+ * failure. All ordinary validation, coverage and atomic commit checks still run.
+ */
+export function recoverV4ClockAnswer(c:any,a:any,proposals:any[]){
+ if(!/^\d{1,2}(?::\d{2})?\s*(?:am|pm)$/i.test(a.text.trim())||proposals.some(p=>p?.safety?.intent&&p.safety.intent!=='none'))return null;
+ const asked=c.state.tasks.filter((t:any)=>t.question);
+ if(asked.length!==1||!/time|waqt|samay|baje/i.test(asked[0].question))return null;
+ const target=c.state.records.find((r:any)=>r.id===asked[0].targetId);
+ if(target?.kind!=='task'||!/^\d{4}-\d{2}-\d{2}$/.test(target.date??''))return null;
+ const p=expandV4({introduced:c.state.onboardingIntroduced===true,reply:'Checking your reminder.',actions:[],tasks:c.state.tasks},a.messageId,a.text);
+ if(!completeV4ReminderDay(p,c,a)||p.actions.length!==1||p.actions[0].type!=='reminder')return null;
+ return labResponse.parse(p);
+}
 /** Expand an owned one-off correction into an atomic cancel-and-replace set. */
 export function normalizeV4ReminderReplacement(p:any,c:any,a:any){
  for(const x of p.actions)if(x.type==='remove'&&c.state.reminders.some((n:any)=>n.id===x.targetId)){x.type='correct';x.state='cancelled';}
@@ -165,7 +179,11 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
  }return transform(parsed,decode);};
  const expandProposed=async(p:any)=>{try{return expandV4(p,a.messageId,a.text);}catch(error){
   const repaired=await call({task:'Repair this compact proposed response to the permitted schema. Return JSON only {reply:string,introduced:boolean,actions:[],tasks:[],clarification:string|null}. Keep all supported facts/actions and owned short IDs; do not invent or discard facts. Action type save|correct|complete|remove|profile|reminder|retrieve. kind history|experience|event|plan|food|meal_choice|grocery|schedule|appointment|question|task. A reported symptom on a stated day is event; recurring experience without occurrence day is experience. Omit unused/null fields. Evidence/date/time/labels are exact owned source spans. Backend validates every action and coverage after repair; nothing is saved by this call.',currentMessage:encodedInput.currentMessage,proposal:transform(p,encode),schemaError:error instanceof Error?error.message.slice(0,1600):'Invalid fields'});
-  return expandV4({...repaired,safety:p.safety??repaired.safety},a.messageId,a.text);
+  try{return expandV4({...repaired,safety:p.safety??repaired.safety},a.messageId,a.text);}catch(repairError){
+   const recovered=recoverV4ClockAnswer(c,a,[p,repaired]);
+   if(recovered)return recovered;
+   throw repairError;
+  }
  }};
  let part:any;for(let batch=0;batch<16;batch++){part=await call({input:encodedInput,alreadyProposedActions:transform(parts.flatMap(p=>p.actions??[]),encode),batch,instruction:"STRICT 350-token budget: return exactly ONE new substantial action or up to THREE short grocery actions, omit repeated text when label suffices. Never repeat alreadyProposedActions. With actions remaining return more:true,reply:empty string,tasks:[]. For an activity plan use its exact activity name as label (for example workout or yoga), never just a frequency such as 3 times a week. Preserve the full activity-frequency clause in evidence or text. When all remaining actions fit in this response, return those actions WITH more:false, a short final reply and all tasks. Do not require an extra empty-action turn to finalize a complete simple update. Return more:true only when additional independent facts/actions remain; never omit them to finish early. Unresolvable year stays pending task, no dated write."});parts.push(part);if(part.more&&!(part.actions??[]).length){part=await call({task:'Return JSON only {reply:string,clarification:string|null,tasks:[{id:string,sourceMessageId:string,targetId:string|null,topic:string,question:string|null}],introduced:boolean}. The continuation supplied no new actions. Finalize the already proposed actions without inventing new actions or facts. Preserve the full unfinished task set from input, removing only resolved questions. Ask one genuinely missing question, matching clarification exactly; otherwise clarification null. Never ask another yes after a clear instruction. Introduce InTune only when input.onboarding.introduced is false. If it is true, do not introduce InTune or repeat onboarding; give the result directly. The independent fact coverage check follows and can recover omitted facts.',input:encodedInput,proposedActions:transform(parts.flatMap(p=>p.actions??[]),encode)});part.actions=[];part.more=false;parts.push(part);break;}if(!part.more)break;if(batch===15)throw Error('This message needs more processing than is available. Please split it into two messages.');}
   if(part?.clarification&&typeof part.clarification==='object')part.clarification=part.clarification.question;
