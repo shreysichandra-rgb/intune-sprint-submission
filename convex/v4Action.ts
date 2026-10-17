@@ -1,4 +1,5 @@
 "use node";
+import {hasReminderRequest} from './reminderRequest';
 import {restoreV4WorkoutReminderLink} from './v4ReminderContext';
 import {languageExplanationReply} from './v4Language';
 import {silenceRepeatedCheckinOffer,checkinPermission,checkinTimingTopic,checkinOfferTopic} from './progressCheckins';
@@ -28,16 +29,53 @@ export function safeV4ModelFields(value:any):any {
  return value;
 }
 export function expandV4(p:any,messageId:string,currentText?:string){const splitActions=(p.actions??[]).flatMap((a:any)=>{if(a.type!=='reminder'||a.repeat!=='weekly'||typeof a.datePhrase!=='string')return [a];const phrase=a.datePhrase.toLowerCase(),days=[...phrase.matchAll(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/g)].map(m=>m[0]),residue=phrase.replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|every|each|week|weekly|on|and)\b/g,'').replace(/[\s,]+/g,'');if(days.length<2||residue||!a.evidence?.toLowerCase().includes(phrase))return [a];return [...new Set(days)].map((datePhrase,i)=>({...a,datePhrase,tempId:a.tempId?a.tempId+'-day-'+i:null}));});const used=new Set(splitActions.map((a:any)=>a.tempId).filter(Boolean));const actions=splitActions.map((a:any,i:number)=>{if(a.type!=='reminder'||a.state==='cancelled'||a.tempId)return a;let id='server-reminder-'+i;while(used.has(id))id+='r';used.add(id);return {...a,tempId:id};});return labResponse.parse({onboarding:{introduced:p.introduced===true||p.onboarding?.introduced===true},reply:p.reply,clarification:typeof p.clarification==='object'?p.clarification?.question??null:p.clarification??null,actions:actions.map((a:any)=>Object.fromEntries([...keys.map(k=>[k,a[k]??null]),['type',a.type],['kind',a.kind==='period'&&a.datePhrase?'event':a.kind??null],['sourceMessageId',a.sourceMessageId??messageId],['evidence',a.evidence??(a.type==='retrieve'&&(!a.sourceMessageId||a.sourceMessageId===messageId)?currentText:undefined)]])),open_tasks:(p.tasks??p.open_tasks??[]).map((t:any,i:number)=>({topic:t.topic,id:t.id??'question:'+messageId+':'+i,targetId:t.targetId===(t.sourceMessageId??messageId)&&!(p.actions??[]).some((x:any)=>x.tempId===t.targetId)?null:t.targetId??null,question:t.question??null,sourceMessageId:t.sourceMessageId??messageId})),safety:{intent:p.safety?.intent??'none',sourceMessageId:p.safety?.sourceMessageId??null,evidence:p.safety?.evidence??null,reason:p.safety?.reason??null}});}
+/** Preserve a fully specified current request even if the model asks its time again.
+ * Only one explicit current-day clock and one uniquely grounded purpose qualify.
+ * Independent coverage and the ordinary atomic access/source checks still run.
+ */
+export function completeV4ExplicitReminder(p:any,c:any,a:any){
+ if(a.quotedMessageId||!c.reminderDeliveryConfigured||c.state.access.mode!=='active_paid'||!c.state.control.storage||c.state.control.tracking!=='active'||c.state.control.safetyPaused||p.safety.intent!=='none')return false;
+ const source=c.sources.find((s:any)=>s.messageId===a.messageId&&s.role==='user'&&s.canSave!==false);
+ if(!source||!hasReminderRequest(a.text)||/\b(?:daily|weekly|every|each|roz|mat|nahi|nahin|cancel|stop)\b/i.test(a.text))return false;
+ const match=a.text.match(/\b(aaj)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)(?:\s+IST)?)\s+par\s+(.+?)\s+yaad\s+dila\s+(?:dena|do)[.!?]*$/i);
+ if(!match||[...a.text.matchAll(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi)].length!==1)return false;
+ const purpose=match[3].trim().toLowerCase();if(!purpose||/\b(?:aur|or|ya|and)\b|[,;?!]/i.test(purpose))return false;
+ const due=reminderDue(match[1],match[2],source.at,'Asia/Kolkata');if(!due.dueAt||due.dueAt<=c.now)return false;
+ const mentions=(label:string)=>(' '+label.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim()+' ').includes(' '+purpose+' ');
+ const saves=p.actions.filter((x:any)=>x.type==='save'&&x.kind==='task'&&x.sourceMessageId===a.messageId&&typeof x.label==='string'&&mentions(x.label));
+ const owned=c.state.records.filter((r:any)=>r.kind==='task'&&mentions(r.label));
+ if(saves.length>1||!saves.length&&owned.length!==1)return false;
+ let target=saves.length?saves[0].tempId:owned[0].id;
+ if(saves.length&&!target){target='current-reminder-purpose';while(p.actions.some((x:any)=>x.tempId===target))target+='x';}
+ if(p.actions.some((x:any)=>x.type==='reminder'&&(x.targetId!==target||x.state==='cancelled')))return false;
+ if(saves.length&&!saves[0].tempId)saves[0].tempId=target;
+ const action=expandV4({reply:'Checking your reminder.',actions:[{type:'reminder',targetId:target,sourceMessageId:a.messageId,evidence:match[0],permissionEvidence:match[0],datePhrase:match[1],timePhrase:match[2],repeat:'once'}]},a.messageId,a.text).actions[0];
+ p.actions=[...p.actions.filter((x:any)=>x.type!=='reminder'),action];
+ // Retire only timing questions for this current request or matching purpose.
+ const timing=(t:any)=>/reminder|time|date|yaad|waqt|samay/i.test((t.topic??'')+' '+(t.question??''));
+ const old=c.state.tasks.filter((t:any)=>timing(t)&&(t.targetId===target||!t.targetId&&t.question?.toLowerCase().includes(purpose)));
+ const resolved=new Set([...old.map((t:any)=>t.id),...p.open_tasks.filter((t:any)=>timing(t)&&(t.targetId===target||t.sourceMessageId===a.messageId&&(/reminder/i.test(t.topic??'')||t.question?.toLowerCase().includes(purpose)))).map((t:any)=>t.id)]);
+ const questions=new Set(p.open_tasks.filter((t:any)=>resolved.has(t.id)).map((t:any)=>t.question));
+ p.open_tasks=p.open_tasks.filter((t:any)=>!resolved.has(t.id));
+ if(questions.has(p.clarification))p.clarification=null;
+ p.reply='Checking your reminder.';return true;
+}
 /** Complete a schedule-only answer to one currently asked owned reminder. */
 export function completeV4ReminderDay(p:any,c:any,a:any){
  if(a.quotedMessageId||!c.reminderDeliveryConfigured||c.state.access.mode!=='active_paid'||!c.state.control.storage||c.state.control.tracking!=='active'||c.state.control.safetyPaused||p.safety.intent!=='none')return false;
  const asked=c.state.tasks.filter((t:any)=>t.question);
- if(asked.length!==1||!(asked[0].id.startsWith('reminder-pending:')||/reminder/i.test(asked[0].topic??'')))return false;
- const task=asked[0],source=c.sources.find((s:any)=>s.messageId===task.sourceMessageId),target=c.state.records.find((r:any)=>r.id===task.targetId);
- if(!source||source.canSave===false||!/(remind|nudge|check[ -]?in)/i.test(source.text)||/\b(?:daily|weekly|every|each)\b/i.test(source.text)||!target)return false;
+ const hinglish=a.text.trim().match(/^(aaj)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)(?:\s+IST)?)\s+par\s+(.+?)\s+yaad\s+dila\s+(?:dena|do)[.!?]*$/i);
+ if(asked.length!==1||!(asked[0].id.startsWith('reminder-pending:')||/reminder/i.test(asked[0].topic??'')||hinglish&&asked[0].topic==='conversation clarification'))return false;
+ const task=asked[0],source=c.sources.find((s:any)=>s.messageId===task.sourceMessageId);
+ // A generic wording pass may have lost the target link. Recover only the one
+ // task saved by that very request, with a repeated, exact purpose span.
+ const candidates=hinglish?c.state.records.filter((r:any)=>r.kind==='task'&&r.sourceMessageId===source?.messageId&&r.label.toLowerCase().includes(hinglish[3].trim().toLowerCase())):[];
+ const target=c.state.records.find((r:any)=>r.id===task.targetId)??(candidates.length===1?candidates[0]:null);
+ if(hinglish&&(!target||!target.label.toLowerCase().includes(hinglish[3].trim().toLowerCase())))return false;
+ if(!source||source.canSave===false||!hasReminderRequest(source.text)||/\b(?:daily|weekly|every|each)\b/i.test(source.text)||!target)return false;
  // Only timing-only replies qualify. A changed purpose, recurrence, multiple
  // reminders or a quotation stays with independent interpretation.
- const clean=a.text.trim().replace(/[.!?]+$/,'').replace(/\s+please$/i,'').replace(/\s+is\s+(?:ok|okay)$/i,'');
+ const clean=hinglish?hinglish[1]+' at '+hinglish[2].replace(/\s+IST$/i,''):a.text.trim().replace(/[.!?]+$/,'').replace(/\s+please$/i,'').replace(/\s+is\s+(?:ok|okay)$/i,'');
  const clockMatch=clean.match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i),clockSpan=clockMatch?.[0]??null;
  let dateSpan=clean.replace(/^(?:yes[ ,]+|ok(?:ay)?[ ,]+)?(?:remind me\s+)?(?:on\s+)?/i,'');
  if(clockSpan)dateSpan=dateSpan.replace(clockSpan,'').replace(/\s*(?:at|,)\s*$/i,'').trim();
@@ -166,7 +204,7 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
    const source=c.sources.find((m:any)=>m.messageId===x.sourceMessageId);if(!source||source.canSave===false)continue;
    if(!x.dateSourceRecordId&&x.datePhrase&&!source.text.toLowerCase().includes(x.datePhrase.toLowerCase())||!x.timeSourceMessageId&&x.timePhrase&&!source.text.toLowerCase().includes(x.timePhrase.toLowerCase()))continue;
    if(!x.datePhrase&&x.repeat==='weekly'){const dates=[...source.text.matchAll(/\b(?:every|each)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi)];if(dates.length===1)x.datePhrase=dates[0][0];}
-   const pendingPurpose=c.state.tasks.some((t:any)=>t.targetId===x.targetId&&t.question&&t.id.startsWith('reminder-pending:')&&c.sources.some((prior:any)=>prior.messageId===t.sourceMessageId&&prior.canSave!==false&&/(remind|nudge|check[ -]?in)/i.test(prior.text)));
+   const pendingPurpose=c.state.tasks.some((t:any)=>t.targetId===x.targetId&&t.question&&t.id.startsWith('reminder-pending:')&&c.sources.some((prior:any)=>prior.messageId===t.sourceMessageId&&prior.canSave!==false&&hasReminderRequest(prior.text)));
    const fields=reminderFieldSources(x,c.state,c.sources);const rememberedTime=fields.time;
    const due=requestedReminderDue(x,fields,source);
    if(due.dueAt||!due.question)continue;
@@ -204,7 +242,7 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
     if(focused.complete===true&&Array.isArray(focused.missing)&&focused.missing.length===0)check={...check,complete:true,missing:[]};
    }
   }
-  if(check.complete===false&&Array.isArray(check.missing)&&check.missing.length===0&&verifiedPreview?.valid&&p.open_tasks.some((t:any)=>t.id.startsWith('reminder-pending:')&&t.sourceMessageId===a.messageId&&t.question===p.clarification&&t.question)&&/(remind|nudge|check[ -]?in)/i.test(a.text))check={...check,complete:true,availableReminderRequestUnresolved:false};
+  if(check.complete===false&&Array.isArray(check.missing)&&check.missing.length===0&&verifiedPreview?.valid&&p.open_tasks.some((t:any)=>t.id.startsWith('reminder-pending:')&&t.sourceMessageId===a.messageId&&t.question===p.clarification&&t.question)&&hasReminderRequest(a.text))check={...check,complete:true,availableReminderRequestUnresolved:false};
   if(check.complete===false&&Array.isArray(check.missing)&&check.missing.length===0&&p.actions.length>0&&verifiedPreview?.valid&&p.safety.intent==='none'&&!check.reminderCancellationUnresolved&&!check.availableReminderRequestUnresolved){
    const focused=await call({task:'Independently resolve a contradictory fact review: complete=false but no missing facts listed. Return JSON ONLY {complete:boolean,missing:["exact current-message span"]}. Verify every independent CURRENT fact against owned grounded proposed actions and resulting records. Saved plan text plus timePhrase retains both weekdays and session time. Explicit frequency is retained in targetNumber; do not invent additional schedule records for each weekday. Names are optional and never a missing health fact. Existing India timezone needs no confirmation. Do not demand replay of history or turn an acknowledgement into a new event. A pending reminder clock question covers an incomplete request without scheduling. Confirm true ONLY when every current fact/action is represented; otherwise list exact missing spans. No side effects.',currentMessage:encodedInput.currentMessage,proposal:transform(p,encode),ownedRecords:encodedInput.savedRecords});
    if(focused.complete===true&&Array.isArray(focused.missing)&&focused.missing.length===0)check={...check,complete:true};
@@ -213,8 +251,8 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
   if(encodedInput.onboarding.needsFirstTask===true&&p.actions.every((x:any)=>x.type==='profile')&&p.safety.intent==='none'&&typeof check.firstTaskQuestion==='string'&&check.firstTaskQuestion.trim()){const question=check.firstTaskQuestion.trim();p.clarification=question;p.reply=preserveV4Question(p.reply,question);for(const t of p.open_tasks)t.question=null;p.open_tasks.push({id:'first-task:'+a.messageId,sourceMessageId:a.messageId,targetId:null,topic:'first task invitation',question});}
   if(check.complete===true&&check.firstTaskInstructionOnly===true&&encodedInput.onboarding.needsFirstTask===true&&!p.actions.length&&p.safety.intent==='none'&&!(check.missing??[]).length){p.clarification=null;p.open_tasks=p.open_tasks.map((t:any)=>({...t,question:null}));p.reply=preserveV4Question(p.reply,null);}
   if(check.reminderCancellationUnresolved===true)return 'Missing the requested unambiguous owned reminder cancellation. Use its n reminder ID and state cancelled, no permission or time question.';
-  for(const permission of transform(check.contextualReminderPermissions??[],decode)){const x=p.actions[permission.actionIndex];if(!Number.isInteger(permission.actionIndex)||!x||x.type!=='reminder'||x.state==='cancelled'||x.sourceMessageId!==a.messageId||typeof permission.evidence!=='string'||!permission.evidence.trim()||!a.text.toLowerCase().includes(permission.evidence.toLowerCase()))continue;const target=c.state.records.find((r:any)=>r.id===x.targetId);if(target&&(a.text.toLowerCase().includes(target.label.toLowerCase())||c.state.tasks.some((t:any)=>t.targetId===target.id&&t.question&&t.id.startsWith('reminder-pending:')))&&(c.state.reminders.some((r:any)=>r.targetId===target.id&&/(remind|nudge|check[ -]?in)/i.test(r.permission??''))||c.state.tasks.some((t:any)=>t.targetId===target.id&&t.id.startsWith('reminder-pending:')&&t.question&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&/(remind|nudge|check[ -]?in)/i.test(src.text)))))x.permissionEvidence=permission.evidence;}
-  for(let i=0;i<p.actions.length;i++){const x=p.actions[i];if(x.type==='reminder'&&x.state!=='cancelled'&&!/(remind|nudge|check[ -]?in|send.*summary|send.*recap)/i.test(x.permissionEvidence??'')){const confirmations=transform(check.contextualReminderPermissions??[],decode);const fields=reminderFieldSources(x,c.state,c.sources),exactClockAnswer=x.sourceMessageId===a.messageId&&x.timePhrase===a.text&&!!resolveTime(a.text)&&!!fields.purpose&&fields.scheduleGrounded&&new Set(c.state.tasks.filter((t:any)=>/reminder/i.test(t.topic??'')&&t.targetId).map((t:any)=>t.targetId)).size===1;if(!exactClockAnswer&&!(pendingDayResolved&&x.sourceMessageId===a.messageId&&x.permissionEvidence===a.text)&&!confirmations.some((v:any)=>v.actionIndex===i&&v.evidence===x.permissionEvidence&&typeof v.evidence==='string'&&a.text.toLowerCase().includes(v.evidence.toLowerCase())))return 'Reminder purpose continuation was not independently confirmed. Ask one genuine ambiguity question; do not claim scheduling.';}}
+  for(const permission of transform(check.contextualReminderPermissions??[],decode)){const x=p.actions[permission.actionIndex];if(!Number.isInteger(permission.actionIndex)||!x||x.type!=='reminder'||x.state==='cancelled'||x.sourceMessageId!==a.messageId||typeof permission.evidence!=='string'||!permission.evidence.trim()||!a.text.toLowerCase().includes(permission.evidence.toLowerCase()))continue;const target=c.state.records.find((r:any)=>r.id===x.targetId);if(target&&(a.text.toLowerCase().includes(target.label.toLowerCase())||c.state.tasks.some((t:any)=>t.targetId===target.id&&t.question&&t.id.startsWith('reminder-pending:')))&&(c.state.reminders.some((r:any)=>r.targetId===target.id&&hasReminderRequest(r.permission??''))||c.state.tasks.some((t:any)=>t.targetId===target.id&&t.id.startsWith('reminder-pending:')&&t.question&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&hasReminderRequest(src.text)))))x.permissionEvidence=permission.evidence;}
+  for(let i=0;i<p.actions.length;i++){const x=p.actions[i];if(x.type==='reminder'&&x.state!=='cancelled'&&!hasReminderRequest(x.permissionEvidence??'')&&!/send.*summary|send.*recap/i.test(x.permissionEvidence??'')){const confirmations=transform(check.contextualReminderPermissions??[],decode);const fields=reminderFieldSources(x,c.state,c.sources),exactClockAnswer=x.sourceMessageId===a.messageId&&x.timePhrase===a.text&&!!resolveTime(a.text)&&!!fields.purpose&&fields.scheduleGrounded&&new Set(c.state.tasks.filter((t:any)=>/reminder/i.test(t.topic??'')&&t.targetId).map((t:any)=>t.targetId)).size===1;if(!exactClockAnswer&&!(pendingDayResolved&&x.sourceMessageId===a.messageId&&x.permissionEvidence===a.text)&&!confirmations.some((v:any)=>v.actionIndex===i&&v.evidence===x.permissionEvidence&&typeof v.evidence==='string'&&a.text.toLowerCase().includes(v.evidence.toLowerCase())))return 'Reminder purpose continuation was not independently confirmed. Ask one genuine ambiguity question; do not claim scheduling.';}}
   retireV4ResolvedStock(p,c.state.records);
   const answered=new Set<string>((Array.isArray(check.answeredTaskIds)?check.answeredTaskIds:[]).map((id:string)=>decode.get(id)??id).filter((id:string)=>c.state.tasks.some((t:any)=>t.id===id)));
   if(answered.size){const retired=p.open_tasks.filter((t:any)=>answered.has(t.id)&&c.state.tasks.some((old:any)=>old.id===t.id&&old.topic===t.topic&&old.sourceMessageId===t.sourceMessageId&&old.targetId===t.targetId&&(t.question===null||t.question===old.question)));p.open_tasks=p.open_tasks.filter((t:any)=>!retired.includes(t));if(retired.some((t:any)=>t.question===p.clarification)){p.clarification=null;p.reply=preserveV4Question(p.reply,null);}}
@@ -269,13 +307,13 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
  // A clock-only answer to one displayed daily-reminder time question has no
  // missing day. Propose the continuation, then keep independent permission
  // review and backend validation exactly as for model-proposed reminders.
- const clock=resolveTime(a.text),dailyPending=c.state.tasks.filter((t:any)=>t.question&&/time/i.test(t.question)&&t.id.startsWith('reminder-pending:')&&t.targetId&&c.state.records.some((r:any)=>r.id===t.targetId)&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&/remind|nudge|check[ -]?in/i.test(src.text)&&/\b(?:daily|every day|each day)\b/i.test(src.text)));
+ const clock=resolveTime(a.text),dailyPending=c.state.tasks.filter((t:any)=>t.question&&/time/i.test(t.question)&&t.id.startsWith('reminder-pending:')&&t.targetId&&c.state.records.some((r:any)=>r.id===t.targetId)&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&hasReminderRequest(src.text)&&/\b(?:daily|every day|each day)\b/i.test(src.text)));
  if(clock&&!a.quotedMessageId&&c.state.control.tracking==='active'&&c.state.tasks.filter((t:any)=>t.question).length===1&&dailyPending.length===1&&input.reminderDeliveryConfigured&&input.controls.newInformationAllowed&&p.safety.intent==='none'&&p.actions.every((x:any)=>x.type==='reminder'&&x.targetId===dailyPending[0].targetId&&x.state!=='cancelled')){
   const task=dailyPending[0];p.actions=expandV4({introduced:p.onboarding.introduced,reply:p.reply,actions:[{type:'reminder',targetId:task.targetId,sourceMessageId:a.messageId,evidence:a.text,permissionEvidence:a.text,timePhrase:a.text,repeat:'daily'}],tasks:[]},a.messageId,a.text).actions;
   p.open_tasks=p.open_tasks.filter((t:any)=>t.id!==task.id&&!(t.sourceMessageId===task.sourceMessageId&&/reminder/i.test(t.topic??''))).map((t:any)=>({...t,question:null}));p.clarification=null;p.reply='Your daily reminder is set for '+a.text.trim()+'.';
  }
 
- const oncePending=c.state.tasks.filter((t:any)=>t.question&&/time/i.test(t.question)&&t.id.startsWith('reminder-pending:')&&c.state.records.some((r:any)=>r.id===t.targetId&&r.kind==='task')&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&/remind|nudge|check[ -]?in/i.test(src.text)&&!/\b(?:daily|weekly|every|each|today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|on|at|in|after|before)\b|\d/i.test(src.text)));
+ const oncePending=c.state.tasks.filter((t:any)=>t.question&&/time/i.test(t.question)&&t.id.startsWith('reminder-pending:')&&c.state.records.some((r:any)=>r.id===t.targetId&&r.kind==='task')&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&hasReminderRequest(src.text)&&!/\b(?:daily|weekly|every|each|today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|on|at|in|after|before)\b|\d/i.test(src.text)));
  if(!pendingDayResolved&&clock&&!a.quotedMessageId&&c.state.control.tracking==='active'&&c.state.tasks.filter((t:any)=>t.question).length===1&&oncePending.length===1&&input.reminderDeliveryConfigured&&input.controls.newInformationAllowed&&p.safety.intent==='none'&&p.actions.every((x:any)=>x.type==='reminder'&&x.targetId===oncePending[0].targetId&&x.state!=='cancelled')){
   const task=oncePending[0],question='Which day should I remind you?';p.actions=expandV4({reply:question,actions:[{type:'correct',targetId:task.targetId,sourceMessageId:a.messageId,evidence:a.text,timePhrase:a.text}]},a.messageId,a.text).actions;
   p.open_tasks=[...p.open_tasks.filter((t:any)=>t.id!==task.id&&!(t.sourceMessageId===task.sourceMessageId&&/reminder/i.test(t.topic??''))).map((t:any)=>({...t,question:null})),{...task,question}];p.clarification=question;p.reply=question;
@@ -287,7 +325,7 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
  for(let i=0;i<p.actions.length;i++){const reminder=p.actions[i];if(reminder.type!=='reminder'||reminder.state==='cancelled'||c.state.records.some((r:any)=>r.id===reminder.targetId)||p.actions.some((x:any)=>x.tempId&&x.tempId===reminder.targetId))continue;const candidates=p.actions.filter((x:any)=>x.type==='save'&&x.kind==='task'&&!x.tempId&&x.sourceMessageId===reminder.sourceMessageId&&x.label&&reminder.evidence.toLowerCase().includes(x.label.toLowerCase()));if(candidates.length===1){const id=reminder.targetId??'reminder-purpose-'+i;candidates[0].tempId=id;reminder.targetId=id;}}
  for(const x of p.actions){
   const current=c.sources.find((m:any)=>m.messageId===x.sourceMessageId),record=c.state.records.find((r:any)=>r.id===x.targetId);
-  if(x.type==='reminder'&&current?.messageId===a.messageId&&record?.time&&x.timePhrase&&!current.text.toLowerCase().includes(x.timePhrase.toLowerCase())&&resolveTime(x.timePhrase)===resolveTime(record.time)&&/^\s*(?:today|tomorrow|tonight)(?:\s+please)?[.!]?\s*$/i.test(current.text)&&c.state.tasks.some((t:any)=>t.targetId===record.id&&t.question&&t.id.startsWith('reminder-pending:')&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&/(remind|nudge|check[ -]?in)/i.test(src.text))))x.timePhrase=null;
+  if(x.type==='reminder'&&current?.messageId===a.messageId&&record?.time&&x.timePhrase&&!current.text.toLowerCase().includes(x.timePhrase.toLowerCase())&&resolveTime(x.timePhrase)===resolveTime(record.time)&&/^\s*(?:today|tomorrow|tonight)(?:\s+please)?[.!]?\s*$/i.test(current.text)&&c.state.tasks.some((t:any)=>t.targetId===record.id&&t.question&&t.id.startsWith('reminder-pending:')&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&hasReminderRequest(src.text))))x.timePhrase=null;
  }
  for(let i=0;i<p.actions.length;i++){const x=p.actions[i];let src=c.sources.find((m:any)=>m.messageId===x.sourceMessageId);if(!src)continue;
   const current=c.sources.find((m:any)=>m.messageId===a.messageId);if(x.type==='correct'&&x.datePhrase&&!src.text.toLowerCase().includes(x.datePhrase.toLowerCase())&&current?.text.toLowerCase().includes(x.datePhrase.toLowerCase())){x.sourceMessageId=current.messageId;x.evidence=current.text;src=current;}
@@ -300,6 +338,12 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
   if(['plan','schedule'].includes(x.kind)&&['save','correct'].includes(x.type)&&x.datePhrase&&/^(?:(?:every|each|on)\s+)?(?:(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:[\s,]+|\s+and\s+)?)+$/i.test(x.datePhrase)&&src.text.toLowerCase().includes(x.datePhrase.toLowerCase())){x.text=x.evidence;x.datePhrase=null;}
   if(x.kind==='food'&&x.type==='save'){x.useSourceText=true;x.text=null;}
   if(x.kind==='food'&&x.type==='save'&&x.parentId&&c.state.records.some((r:any)=>r.id===x.parentId&&r.kind!=='food'))x.parentId=null;
+  // An explicitly named packing checklist is an everyday task, not food stock.
+  // Preserve source text verbatim; no objects or purpose are inferred.
+  const packingList=src.text.match(/\b(?:fictional\s+)?packing list\b/i);
+  if(x.type==='save'&&x.kind==='grocery'&&packingList&&!/\b(?:food|nutrition|grocery)\s+(?:plan|list)\b/i.test(src.text)){
+   x.kind='task';if(!p.actions.some((a:any)=>a!==x&&a.kind==='task'&&a.sourceMessageId===x.sourceMessageId&&/packing/i.test(a.label??'')))x.label=packingList[0];x.state='planned';
+  }
   // Grocery labels are exact ingredient spans, never whole food-plan source copies.
   if(x.kind==='grocery'&&x.type==='save'&&x.useSourceText===true)x.useSourceText=null;
   if(x.type==='save'&&['plan','schedule'].includes(x.kind??'')&&x.targetNumber!==null&&x.targetNumber!==undefined){
@@ -351,6 +395,7 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
  const answeredYears=p.open_tasks.filter((t:any)=>/what year/i.test(t.question??'')&&p.actions.some((x:any)=>x.sourceMessageId===t.sourceMessageId&&x.datePhrase&&/\b\d{4}\b/.test(x.datePhrase)&&x.label&&t.question.toLowerCase().includes(x.label.toLowerCase())));
  if(answeredYears.length){const questions=new Set(answeredYears.map((t:any)=>t.question));p.open_tasks=p.open_tasks.filter((t:any)=>!answeredYears.includes(t));if(questions.has(p.clarification)){p.clarification=null;p.reply=preserveV4Question(p.reply,null);}}
  p.actions=p.actions.filter((x:any)=>!(x.type==='correct'&&['held','ordered','received'].includes(x.state)&&c.state.records.some((r:any)=>r.id===x.targetId&&r.kind==='food')));
+ completeV4ExplicitReminder(p,c,a);
  return truthfulBlockedReply(normalizeV4NameQuestion(retireV4OptionalName(p,c.state.firstTaskStarted===false&&!c.state.profile.name&&c.state.access.mode==='active_paid'),!c.state.profile.name));};
  pendingDayResolved=completeV4ReminderDay(proposal,c,a);
  proposal=await retainUnresolvedDates(await repairGroundedSpans(preserveReminderTasks(proposal)));
@@ -399,7 +444,7 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
  truthfulBlockedReply(proposal);
  // A saved reminder-purpose task is not a scheduled reminder. With only that
  // setup pending, the missing-detail question is the complete useful reply.
- if(input.reminderDeliveryConfigured&&input.controls.newInformationAllowed&&proposal.safety.intent==='none'&&proposal.clarification&&proposal.actions.every((x:any)=>x.type==='retrieve'||x.type==='save'&&x.kind==='task')&&proposal.open_tasks.some((t:any)=>t.question===proposal.clarification&&/reminder/i.test(t.topic??'')&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&/(remind|nudge|check[ -]?in)/i.test(src.text))))proposal.reply=preserveV4Introduction(proposal.clarification,proposal.reply,proposal.onboarding.introduced&&!c.state.onboardingIntroduced&&c.state.access.mode==='active_paid');
+ if(input.reminderDeliveryConfigured&&input.controls.newInformationAllowed&&proposal.safety.intent==='none'&&proposal.clarification&&proposal.actions.every((x:any)=>x.type==='retrieve'||x.type==='save'&&x.kind==='task')&&proposal.open_tasks.some((t:any)=>t.question===proposal.clarification&&/reminder/i.test(t.topic??'')&&c.sources.some((src:any)=>src.messageId===t.sourceMessageId&&src.canSave!==false&&hasReminderRequest(src.text))))proposal.reply=preserveV4Introduction(proposal.clarification,proposal.reply,proposal.onboarding.introduced&&!c.state.onboardingIntroduced&&c.state.access.mode==='active_paid');
  if(input.access.mode==='eligible'&&!proposal.actions.length&&proposal.safety.intent==='none'&&/\b(?:join|checkout)\b|(?:use|enter|redeem).{0,30}coupon/i.test(proposal.reply))proposal.reply=pendingWelcomeReply;
  if(medicalBoundaryRequired&&proposal.safety.intent==='none'&&!proposal.actions.length){proposal.reply=medicalBoundaryReply+(input.access.mode==='eligible'?' '+pendingWelcomeReply:'');proposal.clarification=null;proposal.open_tasks=c.state.tasks.map((t:any)=>({...t,question:null}));}
  if(guidedUnclear&&!proposal.actions.length&&proposal.safety.intent==='none')proposal.reply=preserveV4Introduction(guidedUnclear.reply,proposal.reply,proposal.onboarding.introduced&&!c.state.onboardingIntroduced&&c.state.access.mode==='active_paid');

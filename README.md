@@ -12,7 +12,7 @@ Use Node.js 24 and the committed lockfile.
 
 ```sh
 npm ci
-npm test
+npm test -- --maxWorkers=2
 npx tsc --noEmit -p convex/tsconfig.json
 VITE_CONVEX_URL=https://graceful-ptarmigan-19.convex.cloud npm run build
 ```
@@ -29,10 +29,10 @@ npm run dev starts the local frontend. The local lab/QA scripts require their se
 
 This is a new, separate submission repository with clean local history. The original repository and its private history are retained separately and are not included here. No customer chats, evidence exports or environment values belong in this repository.
 
-The runtime matches recorded released source `8f4dfdce21edf6c290e4f5a89b8edd6720f02da3`, released on 17 October 2026 at 04:53 IST with static release `ba66e557-48dd-4a86-b1e9-fe2cc696ba98`. This includes the enabled 24-hour trial, Hindi explanation support, reminder continuation, clear retry wording when welcome activation changes an in-flight account, and matching explicit dates such as “today, 16 October 2026”. Backend provenance relies on recorded deployment evidence and source comparison, not a server-attested Git hash.
+The runtime matches recorded released source `4b2d2d03697f33a62de843d042cd6b54c2c8cc01`, released on 17 October 2026 at 11:39 IST with static release `435d8d84-933b-430c-800f-009d7f8de0d1`. It includes the enabled 24-hour trial, Hindi/Hinglish support, reminder continuation, explicit date/IST parsing, activation-conflict retry wording and preserving a fully specified current reminder time instead of asking it again. Backend provenance relies on recorded deployment evidence and exact source comparison, not a server-attested Git hash.
 
-Release verification: 1,324 automated tests passed with one optional provider test skipped, backend types/build passed, 22 prior access records/clocks and all 38 public website files unchanged. Actual-AI fictional reminder tests used simulated WhatsApp transport. The founder confirmed fictional note save/close/reopen/retrieval on an existing account. Fresh timed-reminder arrival remains to be checked with the founder; simulated tests are not phone proof.
+Release verification: 1,354 automated tests passed with one optional provider test skipped, backend types/build passed, 22 pre-existing access clocks and all 38 website files unchanged. Actual-AI fictional checks used synthetic WhatsApp transport.
 
-Current-message language support is included: ordinary English now explicitly selects English throughout interpretation/review/reply generation instead of allowing older Hindi context to choose reply wording. Explicit Hindi/Hinglish requests remain supported. Fictional actual-AI Hindi-to-English reminder tests passed with synthetic transport; fresh real-phone language/reminder arrival remains unverified.
+On 17 October the founder used an existing account to request a fictional packing-list reminder for 1:30 PM IST. The supplied time was preserved without a repeat timing question; read-only backend evidence showed exactly one active matching one-time reminder. The founder then explicitly confirmed arrival at 1:30 PM. This is founder-reported existing-account phone evidence, not a new-user trial proof or an independently inspected phone recording. An earlier fictional note save, close/reopen and retrieval was also founder-confirmed. Founder/test accounts are excluded from participant and revenue counts. No private conversation or participant identifiers are included here.
 
 This separate clean repository is public with founder approval. Original private history is excluded. Publishing source does not deploy the app or submit the Sprint entry.

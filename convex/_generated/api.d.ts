@@ -74,6 +74,7 @@ import type * as qaChecks from "../qaChecks.js";
 import type * as qaJudge from "../qaJudge.js";
 import type * as qaScenarios from "../qaScenarios.js";
 import type * as qaStore from "../qaStore.js";
+import type * as reminderRequest from "../reminderRequest.js";
 import type * as replyCopy from "../replyCopy.js";
 import type * as rules from "../rules.js";
 import type * as safety from "../safety.js";
@@ -174,6 +175,7 @@ declare const fullApi: ApiFromModules<{
   qaJudge: typeof qaJudge;
   qaScenarios: typeof qaScenarios;
   qaStore: typeof qaStore;
+  reminderRequest: typeof reminderRequest;
   replyCopy: typeof replyCopy;
   rules: typeof rules;
   safety: typeof safety;

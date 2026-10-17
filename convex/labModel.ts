@@ -1,3 +1,4 @@
+import {hasReminderRequest} from './reminderRequest';
 import {checkinPermission,explicitCheckin,validateCheckinTasks} from './progressCheckins';
 import {z} from 'zod';
 import {foodReportDateSource} from './v4FoodDate';
@@ -22,7 +23,7 @@ export function reminderFieldSources(a:any,state:LabState,sources:Source[]){
  const current=sources.find(s=>s.messageId===a.sourceMessageId&&s.role==='user');if(!current)throw Error('Reminder source unavailable');
  const target=state.records.find(r=>r.id===a.targetId),pending=state.tasks.find(t=>t.targetId===a.targetId&&(t.id.startsWith('reminder-pending:')||/reminder/i.test(t.topic??'')));
  const checkin=checkinPermission(state,sources,a.targetId,current.messageId);
- const purpose=checkin?.source??(current.canSave!==false&&/(remind|nudge|check[ -]?in)/i.test(current.text)?current:pending?sources.find(s=>s.messageId===pending.sourceMessageId&&s.role==='user'&&s.canSave!==false&&/(remind|nudge|check[ -]?in)/i.test(s.text)):null);
+ const purpose=checkin?.source??(current.canSave!==false&&hasReminderRequest(current.text)?current:pending?sources.find(s=>s.messageId===pending.sourceMessageId&&s.role==='user'&&s.canSave!==false&&hasReminderRequest(s.text)):null);
  if(a.dateSourceRecordId){const savedTaskDate=target?.kind==='task'&&!!pending&&!!purpose&&target.date===a.datePhrase&&/^\d{4}-\d{2}-\d{2}$/.test(target.date??'');const weeklySchedule=!!target&&['plan','schedule'].includes(target.kind)&&!!a.datePhrase&&target.text.toLowerCase().includes(a.datePhrase.toLowerCase())&&/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(a.datePhrase)&&!!purpose;if(!target||target.id!==a.dateSourceRecordId||!savedTaskDate&&!weeklySchedule)throw Error('Reminder days must come from the owned requested schedule');}
  let timeSource=current;
  if(a.timeSourceMessageId){if(!purpose||purpose.messageId!==a.timeSourceMessageId)throw Error('Reminder clock must come from its owned pending request');timeSource=purpose;}
@@ -35,7 +36,7 @@ export function reminderFieldSources(a:any,state:LabState,sources:Source[]){
 export function linkReminderTasks(state:LabState,sources:Source[]){
  return state.tasks.map(t=>{
   const request=sources.find(s=>s.messageId===t.sourceMessageId&&s.role==='user'&&s.canSave!==false);
-  if(!request||!/remind|nudge|check[ -]?in/i.test(request.text)||!/reminder/i.test(t.topic??'')||!t.question)return t;
+  if(!request||!hasReminderRequest(request.text)||!/reminder/i.test(t.topic??'')||!t.question)return t;
   const targets=t.targetId?state.records.filter(r=>r.id===t.targetId):state.records.filter(r=>r.kind==='task'&&r.sourceMessageId===request.messageId);
   if(targets.length!==1)return t;
   return {...t,targetId:targets[0].id,id:t.id.startsWith('reminder-pending:')?t.id:'reminder-pending:'+t.id};
@@ -95,8 +96,8 @@ export function applyLabResponse(original:LabState,value:unknown,sources:Source[
    const r=owned(a.targetId),permission=a.permissionEvidence??'',fields=reminderFieldSources(a,original,sources);ground(m,permission);
    const progressCheckIn=a.state==='checkin'||!!fields.checkin;
    if(progressCheckIn&&(!fields.checkin||!['plan','schedule'].includes(r.kind)))throw Error('A session check-in needs explicit purpose permission and an owned activity plan.');
-   const contextualPurpose=(original.reminders.some(old=>old.targetId===r.id&&/(remind|nudge|check[ -]?in)/i.test(old.permission??'')&&m.text.toLowerCase().includes(r.label.toLowerCase()))||!!fields.purpose)&&(a.timePhrase!==null||a.datePhrase!==null);
-   if(!permission||!/(remind|nudge|check[ -]?in|send.*summary|send.*recap)/i.test(permission)&&!contextualPurpose)throw Error('A reminder needs an explicit request, not a timing preference.');
+   const contextualPurpose=(original.reminders.some(old=>old.targetId===r.id&&hasReminderRequest(old.permission??'')&&m.text.toLowerCase().includes(r.label.toLowerCase()))||!!fields.purpose)&&(a.timePhrase!==null||a.datePhrase!==null);
+   if(!permission||!hasReminderRequest(permission)&&!/send.*summary|send.*recap/i.test(permission)&&!contextualPurpose)throw Error('A reminder needs an explicit request, not a timing preference.');
    if(!a.dateSourceRecordId)ground(m,a.datePhrase);if(!a.timeSourceMessageId)ground(m,a.timePhrase);
    const pendingPurpose=!!fields.purpose;
    const recurrenceText=m.text+' '+(fields.purpose?.text??'');

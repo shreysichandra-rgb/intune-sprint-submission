@@ -1,0 +1,13 @@
+import {test,expect} from 'vitest';
+import {completeV4ExplicitReminder} from '../convex/v4Action';
+const now=Date.parse('2026-10-17T05:50:00Z');
+function fixture(){const text='Meri fictional packing list mein charger aur notebook save kar do. Aaj 11:30 am IST par packing yaad dila dena.';return {a:{text,messageId:'current'},c:{now,reminderDeliveryConfigured:true,state:{access:{mode:'active_paid'},control:{storage:true,tracking:'active',safetyPaused:false},records:[],tasks:[]},sources:[{messageId:'current',role:'user',canSave:true,text,at:now}]},p:{reply:'Kis future date aur time?',clarification:'Kis future date aur time?',safety:{intent:'none'},actions:[{type:'save',kind:'task',tempId:'packing',label:'fictional packing list',sourceMessageId:'current'}],open_tasks:[{id:'time',sourceMessageId:'current',targetId:'packing',topic:'reminder timing',question:'Kis future date aur time?'}]}} as any;}
+test.each(['unpaid','paused','withdrawn','blocked source','quoted','safety','unconfigured','past','missing day','ambiguous day','two clocks','two purposes','different purpose'])('explicit time cannot bypass %s',condition=>{
+ const {p,c,a}=fixture();
+ if(condition==='unpaid')c.state.access.mode='unpaid';if(condition==='paused')c.state.control.tracking='paused';if(condition==='withdrawn')c.state.control.storage=false;if(condition==='blocked source')c.sources[0].canSave=false;if(condition==='quoted')a.quotedMessageId='old';if(condition==='safety')p.safety.intent='emergency';if(condition==='unconfigured')c.reminderDeliveryConfigured=false;if(condition==='past')c.now=Date.parse('2026-10-17T06:01:00Z');if(condition==='missing day')a.text=a.text.replace('Aaj ','');if(condition==='ambiguous day')a.text=a.text.replace('Aaj ','Kal ');if(condition==='two clocks')a.text='At 10 am '+a.text;if(condition==='two purposes')p.actions.push({...p.actions[0],tempId:'other'});
+ if(condition==='different purpose')p.actions[0].label='unpacking list';
+ const before=structuredClone(p);expect(completeV4ExplicitReminder(p,c,a)).toBe(false);expect(p).toEqual(before);
+});
+test('filled timing question retires while an unrelated owned question stays',()=>{
+ const {p,c,a}=fixture();p.open_tasks.push({id:'other',sourceMessageId:'old-other',targetId:'other',topic:'doctor question',question:'Which question should I keep?'});expect(completeV4ExplicitReminder(p,c,a)).toBe(true);expect(p.actions.filter((x:any)=>x.type==='reminder')).toHaveLength(1);expect(p.actions[1]).toMatchObject({targetId:'packing',datePhrase:'Aaj',timePhrase:'11:30 am IST',repeat:'once',sourceMessageId:'current'});expect(p.open_tasks.map((x:any)=>x.id)).toEqual(['other']);expect(p.clarification).toBeNull();
+});

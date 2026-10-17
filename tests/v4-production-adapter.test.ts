@@ -487,3 +487,38 @@ test('current English reminder overrides an earlier Hindi explanation on every A
  const result=await t.action(api.messages.send,{token,messageId:'english-after-hindi',text});expect(result.outcome).toBe('conversation');expect(calls).toBeGreaterThan(1);expect(result.message).not.toMatch(/[\u0900-\u097f]/);expect(result.message).toContain('9 am');
  const c=await t.query(q('v4Store:context'),{token,messageId:'inspect-language',text:''});expect(c.state.reminders).toHaveLength(1);expect(c.state.reminders[0].dueAt).toBe(Date.parse('2026-10-12T03:30:00Z'));
 });
+
+ test.each([false,true])('Hinglish packing list and explicit IST reminder keep their facts, past=%s (simulated AI)',async(past)=>{
+  const {t,token}=await setup();vi.stubEnv('INTUNE_LAB_ENABLED','1');vi.stubEnv('CONVEX_CLOUD_URL','http://127.0.0.1:3330');vi.stubEnv('INTUNE_SYNTHETIC_TRANSPORT','1');vi.stubEnv('WHATSAPP_ACCESS_TOKEN','synthetic');vi.stubEnv('WHATSAPP_PHONE_NUMBER_ID','fictional');
+  const clock=Date.parse(past?'2026-10-17T05:35:00Z':'2026-10-17T05:00:00Z');vi.mocked(Date.now).mockReturnValue(clock);
+  const text='Meri fictional packing list mein charger aur notebook save kar do. Aaj 10:55 am IST par packing yaad dila dena.';
+  const proposal={introduced:true,reply:'Charger aur notebook save kiye. Packing reminder check kar raha hoon.',actions:[{type:'save',kind:'grocery',label:'charger aur notebook',text:'charger aur notebook',evidence:'fictional packing list mein charger aur notebook',tempId:'packing'},{type:'reminder',targetId:'packing',datePhrase:'Aaj',timePhrase:'10:55 am IST',timeSourceMessageId:'packing-hinglish',evidence:'Aaj 10:55 am IST par packing yaad dila dena',permissionEvidence:'packing yaad dila dena',repeat:'once'}],tasks:[]};
+  generate.mockImplementation(async(_ctx:any,_u:any,o:any)=>{const p=JSON.parse(o.prompt);return {text:JSON.stringify(!p.task?proposal:p.task.startsWith('Respond with')?{reply:p.proposal.reply}:p.task.startsWith('Return JSON only {reply:string}')?{reply:p.question?'Charger aur notebook save kiye. '+p.question:'Charger aur notebook save kiye.'}:{complete:true,missing:[]})};});
+  const before=await t.run(async c=>(await c.db.query('pilotEntitlements').take(10)).map(g=>({startedAt:g.startedAt,endsAt:g.endsAt})));
+  const result=await t.action(api.messages.send,{token,messageId:'packing-hinglish',text});expect(result.outcome,JSON.stringify(result)).toBe('conversation');
+  const c=await t.query(q('v4Store:context'),{token,messageId:'packing-peek',text:''});expect(c.state.records.some((r:any)=>r.text.includes('charger aur notebook'))).toBe(true);
+  if(past){expect(c.state.reminders).toHaveLength(0);expect(c.state.tasks.some((r:any)=>r.question?.includes('already passed'))).toBe(true);}
+  if(past){
+   // Reproduce the generic wording pass losing its original reminder target.
+   await t.run(async ctx=>{const u=await ctx.db.query('users').withIndex('by_token',q=>q.eq('token',token)).unique();await ctx.db.patch(u!._id,{v4Context:{...u!.v4Context,tasks:u!.v4Context.tasks.map((x:any)=>({...x,topic:'conversation clarification',targetId:null}))}});});
+   generate.mockImplementation(async(_ctx:any,_u:any,o:any)=>{const p=JSON.parse(o.prompt);return {text:JSON.stringify(!p.task?{introduced:true,reply:'Kaunsa time?',actions:[],tasks:[]}:p.task.startsWith('Respond with')?{reply:p.proposal.reply}:{complete:true,missing:[]})};});
+   const follow=await t.action(api.messages.send,{token,messageId:'packing-new-clock',text:'Aaj 12:30 pm IST par packing yaad dila dena.'});expect(follow.outcome,JSON.stringify(follow)).toBe('conversation');
+   const after=await t.query(q('v4Store:context'),{token,messageId:'packing-follow-peek',text:''});expect(after.state.reminders).toHaveLength(1);expect(after.state.reminders[0].dueAt).toBe(Date.parse('2026-10-17T07:00:00Z'));expect(after.state.records).toHaveLength(1);
+  }
+
+  else{expect(c.state.reminders).toHaveLength(1);expect(c.state.reminders[0].dueAt).toBe(Date.parse('2026-10-17T05:25:00Z'));}
+  const duplicate=await t.action(api.messages.send,{token,messageId:'packing-hinglish',text});expect(duplicate.outcome).toBe('provider_duplicate');
+  expect(await t.run(async c=>(await c.db.query('pilotEntitlements').take(10)).map(g=>({startedAt:g.startedAt,endsAt:g.endsAt})))).toEqual(before);
+ });
+
+test.each([false,true])('fully specified current Hinglish reminder cannot repeat its timing question, stale=%s (simulated AI)',async(stale)=>{
+ const {t,token}=await setup();vi.stubEnv('INTUNE_SYNTHETIC_TRANSPORT','1');vi.stubEnv('WHATSAPP_ACCESS_TOKEN','synthetic');vi.stubEnv('WHATSAPP_PHONE_NUMBER_ID','fictional');
+ const clock=Date.parse('2026-10-17T05:50:00Z');vi.mocked(Date.now).mockReturnValue(clock);
+ if(stale)await t.run(async ctx=>{const u=await ctx.db.query('users').withIndex('by_token',q=>q.eq('token',token)).unique();await ctx.db.patch(u!._id,{v4Context:{introduced:true,resetKey:null,firstTaskStarted:true,tasks:[{id:'old-packing-question',sourceMessageId:'old-packing',targetId:null,topic:'reminder timing',question:'Kis future date aur time par packing yaad dilaaun?'}]}});await ctx.db.insert('conversationLog',{userId:u!._id,epoch:0,messageId:'old-packing',direction:'incoming',type:'text',text:'Aaj 10:55 am IST par packing yaad dila dena.',receivedAt:clock-600000,outcome:'error',recordIds:[],suppressed:false});});
+ const text='Meri fictional packing list mein charger aur notebook save kar do. Aaj 11:30 am IST par packing yaad dila dena.';
+ const proposal={introduced:true,reply:'Kis future date aur time par packing yaad dilaaun?',clarification:'Kis future date aur time par packing yaad dilaaun?',actions:[{type:'save',kind:'task',label:'fictional packing list',text:'charger aur notebook',evidence:'fictional packing list mein charger aur notebook'}],tasks:[{id:'asked-again',topic:'reminder timing',question:'Kis future date aur time par packing yaad dilaaun?',sourceMessageId:'current-packing',targetId:'packing'}]};
+ generate.mockImplementation(async(_ctx:any,_u:any,o:any)=>{const p=JSON.parse(o.prompt);return {text:JSON.stringify(!p.task?proposal:p.task.startsWith('Respond with')?{reply:'Packing reminder set for today at 11:30 am IST. Charger aur notebook save kiye.'}:{complete:true,missing:[]})};});
+ const r=await t.action(api.messages.send,{token,messageId:'current-packing',text});expect(r.outcome,JSON.stringify(r)).toBe('conversation');expect(r.message).not.toContain('?');
+ const c=await t.query(q('v4Store:context'),{token,messageId:'inspect-current-packing',text:''});expect(c.state.reminders).toHaveLength(1);expect(c.state.reminders[0].dueAt).toBe(Date.parse('2026-10-17T06:00:00Z'));expect(c.state.records.some((x:any)=>x.text.includes('charger aur notebook'))).toBe(true);expect(c.state.tasks.some((x:any)=>x.question&&/time|date|yaad/i.test(x.question))).toBe(false);
+ const dup=await t.action(api.messages.send,{token,messageId:'current-packing',text});expect(dup.outcome).toBe('provider_duplicate');
+});

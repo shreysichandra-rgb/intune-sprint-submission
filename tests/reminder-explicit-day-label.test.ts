@@ -12,3 +12,11 @@ test.each(['today, 17 October 2026','today, 31 February 2026','today, 16 October
 test('a stated past date never silently becomes tomorrow',()=>{
  expect(reminderDue('today, 16 October 2026','10:40 pm',Date.parse('2026-10-16T17:11:00Z'),'Asia/Kolkata')).toMatchObject({dueAt:null,question:'That reminder time has already passed. Which future date and time should I use?'});
 });
+
+ test('Hinglish aaj and an explicit IST clock preserve India day and reject a past time',()=>{
+  expect(resolveDate('Aaj',Date.parse('2026-10-17T05:00:00Z'),'Asia/Kolkata')).toBe('2026-10-17');
+  expect(reminderDue('Aaj','10:55 am IST',Date.parse('2026-10-17T05:00:00Z'),'Asia/Kolkata')).toMatchObject({question:null,time:'10:55',dueAt:Date.parse('2026-10-17T05:25:00Z')});
+  expect(reminderDue('Aaj','10:55 am IST',Date.parse('2026-10-17T05:35:00Z'),'Asia/Kolkata')).toMatchObject({dueAt:null,question:'That reminder time has already passed. Which future date and time should I use?'});
+  expect(reminderDue('kal','10:55 am IST',Date.parse('2026-10-17T05:00:00Z'),'Asia/Kolkata').dueAt).toBeNull();
+  expect(reminderDue('today','10:55 am PST',Date.parse('2026-10-17T05:00:00Z'),'Asia/Kolkata').dueAt).toBeNull();
+ });

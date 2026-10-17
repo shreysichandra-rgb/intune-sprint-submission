@@ -13,6 +13,7 @@ export function shiftDate(date: string, days: number) {
 export function resolveDate(phrase: string | null, now: number, timezone: string): string | null {
   const today = localDate(now, timezone);
   const p = phrase?.trim().toLowerCase();
+  if (p === 'aaj' || p === 'आज') return today;
   if (p === 'today' || p === 'last night' || p === 'this morning' || p === 'right now') return today;
   if (p&&/^this (?:morning|afternoon|evening|night)$/.test(p)) return today;
   if (p&&/^yesterday (?:morning|afternoon|evening|night)$/.test(p)) return shiftDate(today,-1);
@@ -39,7 +40,7 @@ export function resolveDate(phrase: string | null, now: number, timezone: string
   return null;
 }
 export function resolveTime(phrase: string | null): string | null {
-  const cleaned=phrase?.trim().toLowerCase().replace(/\./g,'');
+  const cleaned=phrase?.trim().toLowerCase().replace(/\./g,'').replace(/\s+ist$/,'');
   const clock=cleaned?.replace(/^(?:around |about |at |approximately |~)/,'');
   if(clock&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock))return clock;
   const match = cleaned?.match(/^(?:around |about |at |approximately |~)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
