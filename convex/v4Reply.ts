@@ -151,5 +151,5 @@ export function v4ReplyLanguage(text:string):string|null {
  if(languageRequest&&/\bhinglish\b/iu.test(text))return 'Hinglish (natural Roman Hindi mixed with English)';
  if(/[\u0900-\u097f]/u.test(text))return 'Hindi';
  if(languageRequest&&/\bhindi\b/iu.test(text))return 'Hinglish (natural Roman Hindi mixed with English)';
- return /\b(?:mera|meri|mere|mein|hain|hai|hoon|mujhe|batao|dikhao|karo|karna|chahiye|nahi|nhi|haan|kaise|khaya|bhejo)\b/i.test(text)?'Hinglish (natural Roman Hindi mixed with English)':null;
+ return /\b(?:mera|meri|mere|mein|hain|hai|hoon|mujhe|batao|dikhao|karo|karna|chahiye|nahi|nhi|haan|kaise|khaya|bhejo)\b/i.test(text)?'Hinglish (natural Roman Hindi mixed with English)':/[A-Za-z]/.test(text)?'English':null;
 }

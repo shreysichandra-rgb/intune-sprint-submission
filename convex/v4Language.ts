@@ -4,6 +4,9 @@ import {v4ReplyLanguage} from './v4Reply';
 export function languageExplanationReply(text:string,state:any,trialEnabled:boolean):string|null {
  if(state.control.safetyPaused)return null;
  const language=v4ReplyLanguage(text);
+ // Ordinary English explanation questions still need their owned context;
+ // this shortcut is only an explicit language-support request.
+ if(language==='English'&&!/\benglish\b/i.test(text))return null;
  if(!language||!/(?:\b(?:explain|samjh\w*|samj\w*)\b|समझ)/iu.test(text))return null;
  const words=text.toLowerCase().normalize('NFKC').replace(/[.!?,।]/gu,' ').trim().split(/\s+/u);
  const allowed=new Set('thoda thodi sa hindi hinglish english me mein mai in please plz pls explain samjaye samjhaaye samjhaye samjhaiye samjhao samjha samjha do samjhana mujhe muje can could you u it this intune ko about the a little bit to kya kripya कृपया थोड़ा थोड़ा हिंदी हिन्दी हिंग्लिश इंग्लिश अंग्रेजी में समझाइए समझाओ समझाएं समझा दो मुझे इसे यह'.split(' '));

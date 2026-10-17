@@ -478,3 +478,12 @@ test('an explicit today plus matching named date schedules the fictional reminde
  expect((await t.action(api.messages.send,{token,messageId:'fictional-labelled-date',text})).outcome).toBe('provider_duplicate');
  expect((await t.query(q('v4Store:context'),{token,messageId:'inspect-duplicate',text:''})).state.reminders).toHaveLength(1);
 });
+
+test('current English reminder overrides an earlier Hindi explanation on every AI stage (simulated AI)',async()=>{
+ const {t,token}=await setup();vi.stubEnv('INTUNE_SYNTHETIC_TRANSPORT','1');vi.stubEnv('WHATSAPP_ACCESS_TOKEN','synthetic');vi.stubEnv('WHATSAPP_PHONE_NUMBER_ID','fictional');
+ const hindi=await t.action(api.messages.send,{token,messageId:'earlier-hindi',text:'Hindi mein samjhao'});expect(hindi.message).toContain('Bilkul');
+ const text='Remind me tomorrow at 9 am to review my fictional packing list.';let calls=0;
+ generate.mockImplementation(async(_ctx:any,_u:any,o:any)=>{const p=JSON.parse(o.prompt);calls++;expect(p.replyLanguage).toBe('English');return {text:JSON.stringify(p.task?.startsWith('Respond with')?{reply:p.proposal.reply}:p.task?{complete:true,missing:[]}:{introduced:true,reply:'I will remind you tomorrow at 9 am to review your fictional packing list.',actions:[{type:'save',kind:'task',label:'review my fictional packing list',evidence:'review my fictional packing list',tempId:'packing'},{type:'reminder',targetId:'packing',datePhrase:'tomorrow',timePhrase:'9 am',evidence:text,permissionEvidence:text,repeat:'once'}],tasks:[]})};});
+ const result=await t.action(api.messages.send,{token,messageId:'english-after-hindi',text});expect(result.outcome).toBe('conversation');expect(calls).toBeGreaterThan(1);expect(result.message).not.toMatch(/[\u0900-\u097f]/);expect(result.message).toContain('9 am');
+ const c=await t.query(q('v4Store:context'),{token,messageId:'inspect-language',text:''});expect(c.state.reminders).toHaveLength(1);expect(c.state.reminders[0].dueAt).toBe(Date.parse('2026-10-12T03:30:00Z'));
+});
