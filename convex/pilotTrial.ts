@@ -6,9 +6,15 @@ import type {Doc} from './_generated/dataModel';
 import {userFor} from './tracking';
 import {accessFor,pilotEnabled,WEEK} from './pilotAccess';
 import {saveReply} from './deliveryState';
+import {v4ReplyLanguage} from './v4Reply';
 export const DAY=86400000;
 export const TRIAL_WELCOME='Hi 👋 Main InTune hoon—taaki sab kuch tumhe yaad na rakhna pade.\n\nYeh welcome deliver hone se tumhara 24-hour free trial shuru hoga. No coupon, card or payment needed.\n\nUske baad continue karna chaho toh ₹99 once for seven days. Payment optional hai—no automatic charge or renewal.\n\nAbhi sirf text. Your details stay until you ask me to delete them.\n\nApna existing food plan yahan type ya paste karo—main usmein listed foods ki grocery list bana dungi.';
-const OFFER='Trial end par ₹99 wale seven-day option ka ek message chahiye toh “Trial reminder yes” bhejo. Nahi chahiye toh koi baat nahi.';
+export function trialUsefulOffer(text:string){
+ const language=v4ReplyLanguage(text);
+ if(language==='Hindi')return 'ट्रायल खत्म होने पर सात दिनों के ₹99 विकल्प का एक संदेश चाहिए तो “Trial reminder yes” भेजें। नहीं चाहिए तो कोई बात नहीं।';
+ if(language?.startsWith('Hinglish'))return 'Trial end par ₹99 wale seven-day option ka ek message chahiye toh “Trial reminder yes” bhejo. Nahi chahiye toh koi baat nahi.';
+ return 'If you would like one message about the ₹99 option for seven days when your trial ends, send “Trial reminder yes”. Otherwise, no message will be scheduled.';
+}
 function contactOpen(u:Doc<'users'>){return !u.dataDeletedAt&&!u.storageWithdrawn&&!u.safetyKind&&u.state!=='paused'&&u.state!=='stopped'&&u.conversationConsent===true&&u.conversationEnabled===true;}
 export const join=internalMutation({args:{token:v.string()},returns:v.any(),handler:async(ctx,a)=>{
  if(!pilotEnabled())return null;
@@ -21,7 +27,7 @@ export const join=internalMutation({args:{token:v.string()},returns:v.any(),hand
  await ctx.scheduler.runAfter(0,ref<'action'>('pilotWelcome:send'),{id});return {id,created:true};
 }});
 // Called in the same transaction as validated writes. No chat/health content is copied.
-export async function recordTrialUsefulAction(ctx:MutationCtx,u:Doc<'users'>,actions:any[],changed:string[],safe:boolean){
+export async function recordTrialUsefulAction(ctx:MutationCtx,u:Doc<'users'>,actions:any[],changed:string[],safe:boolean,messageText=''){
  if(!safe||!changed.length||!contactOpen(u))return '';
  const access=await accessFor(ctx,u);if(access.state!=='active'||access.source!=='trial'||!access.id)return '';
  const g=await ctx.db.get(access.id);if(!g||g.firstUsefulAt!==undefined)return '';
@@ -32,7 +38,7 @@ export async function recordTrialUsefulAction(ctx:MutationCtx,u:Doc<'users'>,act
   else if(actions.some(a=>a.type==='save')&&(item||experience||occurrence))kind=r.kind==='grocery'?'grocery_list':'record_saved';
   if(kind)break;
  }
- if(!kind)return '';await ctx.db.patch(g._id,{firstUsefulAt:Date.now(),firstUsefulKind:kind,nudgeOfferedAt:Date.now()});return OFFER;
+ if(!kind)return '';await ctx.db.patch(g._id,{firstUsefulAt:Date.now(),firstUsefulKind:kind,nudgeOfferedAt:Date.now()});return trialUsefulOffer(messageText);
 }
 export const permission=internalMutation({args:{token:v.string(),text:v.string()},returns:v.any(),handler:async(ctx,a)=>{
  const yes=/^trial reminder (?:yes|haan|ha|please)[.!]?$/i.test(a.text.trim()),no=/^trial reminder (?:no|nahi|nahin)[.!]?$/i.test(a.text.trim());if(!yes&&!no)return null;

@@ -27,3 +27,12 @@ test('trial: Delete still erases records and prevents repeat free access or expi
 test('trial: reply-language hint distinguishes Hinglish/Hindi from English without changing action fields',async()=>{const {v4ReplyLanguage}=await import('../convex/v4Reply');expect(v4ReplyLanguage('Meri grocery list dikhao')).toMatch(/^Hinglish/);expect(v4ReplyLanguage('मुझे याद दिलाओ')).toBe('Hindi');expect(v4ReplyLanguage('Show my grocery list')).toBe('English');});
 
 test('trial: private phone preview cannot launch all users and is excluded from badge funnel',async()=>{vi.stubEnv('INTUNE_TRIAL_ENABLED','0');const f=await fixture();expect(await f.t.mutation(R('pilotTrial:join'),{token:f.token})).toBe(null);vi.stubEnv('INTUNE_TRIAL_PREVIEW_PHONES','+12025550191');const g:any=await f.t.mutation(R('pilotTrial:join'),{token:f.token});expect(g.created).toBe(true);expect((await f.t.run(c=>c.db.get(g.id)))?.actor).toBe('operator_trial_preview');expect(await f.t.query(R('pilotTrial:report'),{})).toMatchObject({rollout:'preview_only',trialStarted:0});});
+
+test('English first-use confirmation does not receive a fixed Hinglish trial offer',async()=>{
+ for(const[k,v]of Object.entries({INTUNE_V4_ENABLED:'1',INTUNE_CONVERSATION_GATE:'candidate',INTUNE_CONVERSATION_ROLLOUT:'all',INTUNE_DEBUG_LOGGING:'1',OPENAI_API_KEY:'fictional'}))vi.stubEnv(k,v);
+ const f=await fixture();await activate(f);
+ generate.mockImplementation(async(_c:any,_u:any,o:any)=>{const p=JSON.parse(o.prompt);return {text:JSON.stringify(p.task?.startsWith('Respond with')?{reply:p.proposal.reply}:{complete:true,missing:[]})};});
+ generate.mockResolvedValueOnce({text:JSON.stringify({introduced:true,reply:'I have saved your fictional breakfast routine.',actions:[{type:'save',kind:'food',label:'breakfast routine',evidence:'breakfast routine is oats or toast',useSourceText:true}],tasks:[]})});
+ const r:any=await f.t.action(api.messages.send,{token:f.token,messageId:'fictional-english-first-save',text:'My breakfast routine is oats or toast'});
+ expect(r.outcome).toBe('conversation');expect(r.message).toContain('Trial reminder yes');expect(r.message).not.toContain('Trial end par');expect(r.message).toContain('If you');
+});
