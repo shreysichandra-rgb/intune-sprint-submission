@@ -151,3 +151,10 @@ test('first incoming Meta ad referral is kept privately without sending conversi
  expect((await t.fetch('/whatsapp/webhook',signed(later))).status).toBe(200);
  expect(await t.run(async c=>(await c.db.query('pilotAcquisitions').collect())[0].source)).toBe('meta_ad:120000000001');
 });
+test('a tapped template button reaches InTune exactly like typing its text',async()=>{
+ for(const [k,v] of Object.entries({INTUNE_PILOT_MODE:'v3',PAYMENT_MODE:'razorpay_live',RAZORPAY_KEY_ID:'rzp_live_synthetic',RAZORPAY_KEY_SECRET:'synthetic-payment-secret',RAZORPAY_WEBHOOK_SECRET:'synthetic-webhook',INTUNE_PILOT_WEB_URL:'https://fictional-checkout.convex.site'}))vi.stubEnv(k,v);
+ send.mockImplementation(async(url:string)=>url==='https://api.razorpay.com/v1/orders'?Response.json({id:'order_fictionalButton',amount:9900,currency:'INR'}):Response.json({messages:[{id:'wamid.fictionalButton'}]}));
+ const t=convexTest(schema,modules),body={object:'whatsapp_business_account',entry:[{changes:[{field:'messages',value:{metadata:{phone_number_id:phoneId},messages:[{from:'12025550184',id:'wamid.fictionalTap',type:'button',button:{text:'Join',payload:'Join'}}]}}]}]};
+ expect((await t.fetch('/whatsapp/webhook',signed(body))).status).toBe(200);
+ expect(send.mock.calls.filter(([url])=>url==='https://api.razorpay.com/v1/orders')).toHaveLength(1);
+});

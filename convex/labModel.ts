@@ -1,8 +1,9 @@
 import {hasReminderRequest} from './reminderRequest';
 import {checkinPermission,explicitCheckin,validateCheckinTasks} from './progressCheckins';
 import {z} from 'zod';
+import {failedUpdateReply} from './copy';
 import {foodReportDateSource} from './v4FoodDate';
-import {localDate,resolveTime} from './rules';
+import {localDate,resolveTime,shiftDate} from './rules';
 import {resolveLabDate as resolveDate} from './labTime';
 import {reminderDue,nextDue} from './pilotReminderRules';
 const nullableText=z.string().max(2000).nullable();
@@ -11,26 +12,30 @@ export const labResponse=z.object({onboarding:z.object({introduced:z.boolean()})
  * Backend labResponse retains optional contextual fields for older owned proposals. */
 export const labWireResponse=labResponse.extend({actions:z.array(labResponse.shape.actions.element.extend({dateSourceRecordId:nullableText,timeSourceMessageId:nullableText})).max(30)});
 export type LabRecord={id:string;kind:string;label:string;text:string;date:string|null;time:string|null;targetNumber:number|null;state:string;parentId:string|null;sourceMessageId:string;evidence:string;reportedAt:number};
-export type LabState={firstTaskStarted?:boolean;onboardingIntroduced?:boolean;profile:{name:string|null;timezone:string};access:{mode:string;startedAt:number|null;endsAt:number|null;source?:string|null;welcomeState?:string|null};control:{tracking:string;storage:boolean;safetyPaused:boolean;safetyAsked:boolean};records:LabRecord[];tasks:any[];reminders:any[]};
+export type LabState={firstTaskStarted?:boolean;onboardingIntroduced?:boolean;profile:{name:string|null;timezone:string};access:{returning?:boolean;mode:string;startedAt:number|null;endsAt:number|null;source?:string|null;welcomeState?:string|null};control:{tracking:string;storage:boolean;safetyPaused:boolean;safetyAsked:boolean};records:LabRecord[];tasks:any[];reminders:any[]};
 export type Source={messageId:string;text:string;role:string;at:number;canSave?:boolean;confirmedCalendarYear?:string;eventDateContext?:{sourceMessageId:string;datePhrase:string};answeredFoodQuestion?:{question:string;mode:'intake'|'choice';targetId:string}};
 export function freshLabState(now:number):LabState{return {onboardingIntroduced:false,profile:{name:null,timezone:'Asia/Kolkata'},access:{mode:'active_test',startedAt:now,endsAt:now+604800000},control:{tracking:'active',storage:true,safetyPaused:false,safetyAsked:false},records:[],tasks:[],reminders:[]};}
 export function activeLab(s:LabState,now:number){return ['active_paid','active_test'].includes(s.access.mode)&&s.access.startedAt!==null&&s.access.startedAt<=now&&s.access.endsAt!==null&&now<s.access.endsAt;}
 export function labSummaryWindow(s:LabState){const startDate=s.access.startedAt!==null?localDate(s.access.startedAt,'Asia/Kolkata'):null,endDate=s.access.endsAt!==null?localDate(s.access.endsAt,'Asia/Kolkata'):null;return {progress:s.records.filter(r=>r.kind==='plan'||r.kind==='schedule'&&r.targetNumber!==null).map(p=>({id:p.id,label:p.label,target:p.targetNumber,completed:s.records.filter(r=>r.parentId===p.id&&r.state==='completed'&&r.date&&startDate&&endDate&&r.date>=startDate&&r.date<=endDate).length,skipped:s.records.filter(r=>r.parentId===p.id&&r.state==='skipped'&&r.date&&startDate&&endDate&&r.date>=startDate&&r.date<=endDate).length})),startDate,endDate,startedAt:s.access.startedAt,endsAt:s.access.endsAt,datedRecords:s.records.filter(r=>r.date&&startDate&&endDate&&r.date>=startDate&&r.date<=endDate).map(r=>r.id),outsidePeriod:s.records.filter(r=>r.date&&startDate&&(r.date<startDate||endDate&&r.date>endDate)).map(r=>r.id),boundaryDayPrecision:'Date-only records on the start/end day have no clock time. Do not invent exact within-hour eligibility.'};}
-export function labFailureReply(error:string){if(error.startsWith('Your seven days have ended.'))return error;const stamp=error.match(/separate lab AI budget.*after (\d{4}-\d\d-\d\dT[\d:.]+Z)/s)?.[1];if(stamp){const at=new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'}).format(new Date(stamp));return `The test AI allowance is temporarily full. Try again after ${at}, India time. Nothing new was saved. Your earlier records and unfinished questions are still here.`;}return 'I couldn’t keep that update just now. Nothing new was saved. Your earlier records and unfinished questions are still here.';}
+export function labFailureReply(error:string){if(error.startsWith('Your seven days have ended.'))return error;const stamp=error.match(/separate lab AI budget.*after (\d{4}-\d\d-\d\dT[\d:.]+Z)/s)?.[1];if(stamp){const at=new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'}).format(new Date(stamp));return `The test AI allowance is temporarily full. Try again after ${at}, India time. Nothing new was saved. Your earlier records and unfinished questions are still here.`;}return failedUpdateReply;}
 export function displayLabReply(reply:string){return reply.replace(/[—–]/g,(dash,offset)=>{const before=reply.slice(0,offset).trimEnd(),after=reply.slice(offset+1).trimStart();return /\d$/.test(before)&&/^\d/.test(after)?dash:', ';}).replace(/\s+,/g,',').replace(/, +/g,', ');}
 /** Reuse owned schedule facts, never fabricate spans in a short reply. */
 export function reminderFieldSources(a:any,state:LabState,sources:Source[]){
  const current=sources.find(s=>s.messageId===a.sourceMessageId&&s.role==='user');if(!current)throw Error('Reminder source unavailable');
  const target=state.records.find(r=>r.id===a.targetId),pending=state.tasks.find(t=>t.targetId===a.targetId&&(t.id.startsWith('reminder-pending:')||/reminder/i.test(t.topic??'')));
  const checkin=checkinPermission(state,sources,a.targetId,current.messageId);
- const purpose=checkin?.source??(current.canSave!==false&&hasReminderRequest(current.text)?current:pending?sources.find(s=>s.messageId===pending.sourceMessageId&&s.role==='user'&&s.canSave!==false&&hasReminderRequest(s.text)):null);
- if(a.dateSourceRecordId){const savedTaskDate=target?.kind==='task'&&!!pending&&!!purpose&&target.date===a.datePhrase&&/^\d{4}-\d{2}-\d{2}$/.test(target.date??'');const weeklySchedule=!!target&&['plan','schedule'].includes(target.kind)&&!!a.datePhrase&&target.text.toLowerCase().includes(a.datePhrase.toLowerCase())&&/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(a.datePhrase)&&!!purpose;if(!target||target.id!==a.dateSourceRecordId||!savedTaskDate&&!weeklySchedule)throw Error('Reminder days must come from the owned requested schedule');}
+ const offer=state.tasks.find(t=>t.targetId===a.targetId&&t.topic==='reminder offer'&&!!t.question),offered=!!offer&&!!target&&sources.filter(s=>s.role==='user'&&s.messageId!==current.messageId&&s.at<=current.at).sort((x,y)=>y.at-x.at)[0]?.messageId===offer.sourceMessageId;
+ // Her answer to InTune's own reminder offer (founder decision 23 Oct): the saved instruction she gave is the purpose.
+ const purpose=checkin?.source??(current.canSave!==false&&hasReminderRequest(current.text)?current:offered?sources.find(s=>s.messageId===offer!.sourceMessageId&&s.role==='user'&&s.canSave!==false)??null:pending?sources.find(s=>s.messageId===pending.sourceMessageId&&s.role==='user'&&s.canSave!==false&&hasReminderRequest(s.text)):null);
+ if(a.dateSourceRecordId){const savedTaskDate=target?.kind==='task'&&!!pending&&!!purpose&&target.date===a.datePhrase&&/^\d{4}-\d{2}-\d{2}$/.test(target.date??'');const weeklySchedule=!!target&&(['plan','schedule'].includes(target.kind)&&target.text.toLowerCase().includes(a.datePhrase?.toLowerCase()??'\u0000')||offered&&['food','plan','schedule'].includes(target.kind)&&!!purpose&&purpose.text.toLowerCase().includes(a.datePhrase?.toLowerCase()??'\u0000'))&&!!a.datePhrase&&/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(a.datePhrase)&&!!purpose;// "Remind me the day before" an owned dated appointment.
+ const appointmentEve=!!target&&target.kind==='appointment'&&/^\d{4}-\d{2}-\d{2}$/.test(target.date??'')&&a.datePhrase===shiftDate(target.date!,-1)&&(/\b(?:the\s+)?(?:day|evening|night)\s+before\b|ek din pe?h(?:a|e)le/i.test(current.text)||offered)&&!!purpose;
+ if(!target||target.id!==a.dateSourceRecordId||!savedTaskDate&&!weeklySchedule&&!appointmentEve)throw Error('Reminder days must come from the owned requested schedule');}
  let timeSource=current;
  if(a.timeSourceMessageId){if(!purpose||purpose.messageId!==a.timeSourceMessageId)throw Error('Reminder clock must come from its owned pending request');timeSource=purpose;}
  if(a.timePhrase&&!timeSource.text.toLowerCase().includes(a.timePhrase.toLowerCase()))throw Error('Reminder clock is unsupported by its source');
  const inheritedClock=purpose?.text.match(/\b\d{1,2}:\d{2}(?:\s*(?:am|pm))?\b|\b\d{1,2}\s*(?:am|pm)\b/i)?.[0]??null;
  const time=a.timePhrase??inheritedClock??(pending&&target?.kind==='task'?target.time:null);
- return {current,target,pending,purpose,time,checkin,scheduleGrounded:!!a.dateSourceRecordId&&!!target&&['plan','schedule'].includes(target.kind)};
+ return {current,target,pending,purpose,time,checkin,offered,scheduleGrounded:!!a.dateSourceRecordId&&!!target&&(['plan','schedule'].includes(target.kind)||offered)};
 }
 /** Repair an owned reminder setup link only when the request has one clear purpose. */
 export function linkReminderTasks(state:LabState,sources:Source[]){
@@ -43,15 +48,21 @@ export function linkReminderTasks(state:LabState,sources:Source[]){
  });
 }
 /** Daily opt-in supplies recurrence, not a fabricated user date. */
+// Any day word means she named a day; then nothing is assumed.
+export const NAMES_A_DAY=/\b(?:today|tonight|tomorrow|tmrw|yesterday|kal|aaj|parso|parson|monday|tuesday|wednesday|thursday|friday|saturday|sunday|daily|weekly|every|each|weekend|week|month|date|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|\b\d{1,2}(?:st|nd|rd|th)\b|\d{1,2}[/-]\d{1,2}|[\u0900-\u097f]/i;
 export function requestedReminderDue(a:any,fields:ReturnType<typeof reminderFieldSources>,source:Source){
  const daily=a.repeat==='daily'&&/daily|every day|each day/i.test(source.text+' '+(fields.purpose?.text??''));
  const clock=a.timePhrase??fields.time??null;
  let due=reminderDue(a.datePhrase??(daily?'today':null),clock,source.at,'Asia/Kolkata',a.repeat??'once');
  if(daily&&!a.datePhrase&&!due.dueAt&&due.time)due=reminderDue('tomorrow',clock,source.at,'Asia/Kolkata','daily');
+ // A one-off time with no day at all means today while that time is still ahead (founder decision 23 Oct); otherwise the day is still asked.
+ if(!due.dueAt&&!a.datePhrase&&!a.dateSourceRecordId&&(a.repeat??'once')==='once'&&a.state!=='checkin'&&!fields.checkin&&clock&&!NAMES_A_DAY.test(source.text+' '+(fields.purpose?.text??''))){const today=reminderDue('today',clock,source.at,'Asia/Kolkata');if(today.dueAt&&today.dueAt>source.at)due=today;}
  return due;
 }
+// A correction replaces the old truth: text that only repeated the old label follows the new label.
+export function sameWords(a:string,b:string){const f=(s:string)=>s.replace(/\s+/g,' ').trim().toLowerCase().replace(/[.!?]+$/,'');return f(a)===f(b);}
 export function applyLabResponse(original:LabState,value:unknown,sources:Source[],now:number,messageId:string){
- const response=labResponse.parse(value),s:LabState=structuredClone(original),outcomes:any[]=[],ids=new Map<string,string>();
+ let response=labResponse.parse(value);const s:LabState=structuredClone(original),outcomes:any[]=[],ids=new Map<string,string>();
  if(response.onboarding.introduced&&!original.onboardingIntroduced&&!/\bInTune\b/i.test(response.reply))throw Error('The introduction was not included in the reply.');
  s.onboardingIntroduced=original.onboardingIntroduced===true||response.onboarding.introduced;
  const source=(id:string,evidence:string)=>{const m=sources.find(m=>m.messageId===id&&m.role==='user');if(!m||!m.text.toLowerCase().includes(evidence.toLowerCase()))throw Error('An action has no supporting owned user message.');return m;};
@@ -98,13 +109,15 @@ export function applyLabResponse(original:LabState,value:unknown,sources:Source[
    if(progressCheckIn&&(!fields.checkin||!['plan','schedule'].includes(r.kind)))throw Error('A session check-in needs explicit purpose permission and an owned activity plan.');
    const contextualPurpose=(original.reminders.some(old=>old.targetId===r.id&&hasReminderRequest(old.permission??'')&&m.text.toLowerCase().includes(r.label.toLowerCase()))||!!fields.purpose)&&(a.timePhrase!==null||a.datePhrase!==null);
    if(!permission||!hasReminderRequest(permission)&&!/send.*summary|send.*recap/i.test(permission)&&!contextualPurpose)throw Error('A reminder needs an explicit request, not a timing preference.');
-   if(!a.dateSourceRecordId)ground(m,a.datePhrase);if(!a.timeSourceMessageId)ground(m,a.timePhrase);
+   // "Remind me … tomorrow", then "9 am": the day comes from her own earlier request, counted from when she said it.
+   const purposeDay=!a.dateSourceRecordId&&!!a.datePhrase&&!m.text.toLowerCase().includes(a.datePhrase.toLowerCase())&&!!fields.purpose&&fields.purpose.messageId!==m.messageId&&fields.purpose.text.toLowerCase().includes(a.datePhrase.toLowerCase())&&(fields.purpose.text.match(/\bremind(?:er)?s?\b/gi)??[]).length===1;
+   if(!a.dateSourceRecordId&&!purposeDay)ground(m,a.datePhrase);if(!a.timeSourceMessageId)ground(m,a.timePhrase);
    const pendingPurpose=!!fields.purpose;
    const recurrenceText=m.text+' '+(fields.purpose?.text??'');
-   const due=requestedReminderDue(a,fields,m);if(!due.dueAt)throw Error(due.question??'Reminder time is unclear.');
+   const due=requestedReminderDue(a,fields,purposeDay?{...m,at:fields.purpose!.at}:m);if(!due.dueAt)throw Error(due.question??'Reminder time is unclear.');if(purposeDay&&due.dueAt<=m.at)throw Error('That time has already passed. What time should I remind you?');
    if(progressCheckIn&&r.time&&due.time&&resolveTime(r.time)&&due.time<=resolveTime(r.time)!)throw Error('Choose a check-in time after the saved session time.');
    if(progressCheckIn&&a.repeat!=='once'&&a.repeat!==null&&!/every|each|weekly|daily/i.test(fields.checkin!.source.text))throw Error('One check-in permission does not authorise repeated check-ins.');
-   if(a.repeat==='daily'&&!/daily|every day|each day/i.test(recurrenceText)||a.repeat==='weekly'&&!(fields.scheduleGrounded&&/\bweek(?:ly)?\b/i.test(r.text+' '+(sources.find(s=>s.messageId===r.sourceMessageId&&s.role==='user')?.text??'')))&&!/weekly|every week|each week|(?:every|each)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i.test(m.text))throw Error('Reminder recurrence is not explicitly supported.');
+   if(a.repeat==='daily'&&!/daily|every day|each day/i.test(recurrenceText)&&!(fields.offered&&/\b(?:every ?day|each day|every morning|every night|every evening|roz|rozana|har din)\b/i.test(fields.purpose?.text??''))||a.repeat==='weekly'&&!(fields.scheduleGrounded&&(/\bweek(?:ly)?\b/i.test(r.text+' '+(sources.find(s=>s.messageId===r.sourceMessageId&&s.role==='user')?.text??''))||fields.offered&&new RegExp('\\b'+(a.datePhrase??'\u0000')+'s?\\b','i').test(fields.purpose?.text??'')))&&!/weekly|every week|each week|(?:every|each)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i.test(m.text))throw Error('Reminder recurrence is not explicitly supported.');
    const prior=progressCheckIn?s.reminders.find(old=>old.progressCheckIn&&old.targetId===r.id&&old.state==='scheduled'&&localDate(old.dueAt,'Asia/Kolkata')===localDate(due.dueAt!,'Asia/Kolkata')):null;
    if(prior){outcomes.push({type:a.type,status:'duplicate',id:prior.id});continue;}
    const id=`${messageId}:${a.tempId??'reminder'}`;
@@ -133,7 +146,7 @@ export function applyLabResponse(original:LabState,value:unknown,sources:Source[
   const parent=a.parentId?owned(a.parentId).id:target?.parentId??null;
   if((a.kind??target?.kind)==='meal_choice'&&parent&&owned(parent).kind!=='food')throw Error('A meal choice can only reference its owned original food plan.');
   if(a.kind==='food'&&parent&&s.records.find(r=>r.id===parent)?.kind!=='food')throw Error('A nutrition plan can only refer to another owned nutrition plan.');
-  const record:LabRecord={id,kind:a.kind??target!.kind,label,text:a.useSourceText===true?m.text:a.text??target?.text??a.evidence,date,time:a.timePhrase??target?.time??null,targetNumber:a.targetNumber??target?.targetNumber??null,state:a.state??target?.state??(a.kind==='experience'?'ongoing':a.kind==='history'?'historical':a.kind==='grocery'?'unchecked':'planned'),parentId:parent,sourceMessageId:m.messageId,evidence:a.evidence,reportedAt:target?.reportedAt??m.at};
+  const record:LabRecord={id,kind:a.kind??target!.kind,label,text:a.useSourceText===true?m.text:a.text??(target&&a.label&&a.label!==target.label&&sameWords(target.text,target.label)?a.label:target?.text)??a.evidence,date,time:a.timePhrase??target?.time??null,targetNumber:a.targetNumber??target?.targetNumber??null,state:a.state??target?.state??(a.kind==='experience'?'ongoing':a.kind==='history'?'historical':a.kind==='grocery'?'unchecked':'planned'),parentId:parent,sourceMessageId:m.messageId,evidence:a.evidence,reportedAt:target?.reportedAt??m.at};
   if(a.type==='save'){
    const same=s.records.find(r=>r.kind===record.kind&&r.label.toLowerCase()===record.label.toLowerCase()&&r.date===record.date&&(record.kind==='grocery'||r.parentId===record.parentId)&&(record.kind!=='event'||r.sourceMessageId===record.sourceMessageId&&r.evidence.toLowerCase()===record.evidence.toLowerCase()));
    if(same){if(a.tempId)ids.set(a.tempId,same.id);outcomes.push({type:a.type,status:'duplicate',id:same.id});continue;}
@@ -144,8 +157,10 @@ export function applyLabResponse(original:LabState,value:unknown,sources:Source[
   if(record.kind==='grocery'&&['ordered','received','held'].includes(record.state))for(const reminder of s.reminders){const siblings=s.records.filter(x=>x.kind==='grocery'&&x.parentId===record.parentId);if(reminder.groceryOrderGlobal&&!s.records.some(x=>x.kind==='grocery'&&x.state==='pending')||reminder.targetId===id||record.parentId&&reminder.targetId===record.parentId&&siblings.every(x=>['ordered','received','held'].includes(x.state)))reminder.state='cancelled';}
  }
  if(outcomes.every(o=>o.status==='read')&&/^(?:noted|kept|recorded)\b/i.test(response.reply))throw Error(!activeLab(s,now)?'Your seven days have ended. Nothing new was saved. You can still retrieve, correct or delete existing records.':'The reply claims an action that did not succeed.');
- const replyTimes=[...response.reply.matchAll(/\b(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)|(?:[01]\d|2[0-3]):[0-5]\d)\b/gi)].map(m=>resolveTime(m[0])??m[0]);const reminderRead=response.actions.every(a=>a.type==='retrieve')&&original.reminders.some(r=>r.state==='scheduled'&&response.reply.toLowerCase().includes(r.title.toLowerCase())&&replyTimes.includes(r.time))&&!/\bi(?:['’]ve| have)? (?:set|scheduled|changed|updated)/i.test(response.reply);
- if(!reminderRead&&!outcomes.some(o=>!['read','duplicate'].includes(o.status))&&/(?:\bi(?:['’]ve| have)? (?:saved|kept|noted|recorded|added|updated|corrected|scheduled|deleted)|^(?:saved|added|corrected|scheduled|deleted)\b|reminder (?:is |has been )?(?:set|scheduled))/i.test(response.reply))throw Error('The reply claims an action that did not succeed.');
+ const replyTimes=[...response.reply.matchAll(/\b(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)|(?:[01]\d|2[0-3]):[0-5]\d)\b/gi)].map(m=>resolveTime(m[0])??m[0]);const reminderRead=response.actions.every(a=>a.type==='retrieve')&&original.reminders.some(r=>r.state==='scheduled'&&(response.actions.some(a=>a.type==='retrieve'&&a.targetId===r.id)||response.reply.toLowerCase().includes(r.title.toLowerCase())||/* "your vitamin D reminder" for "take my vitamin D" */r.title.toLowerCase().split(/[^\p{L}\d]+/u).some((w:string)=>w.length>3&&!['take','remind','reminder','about','that','with','your'].includes(w)&&new RegExp('\\b'+w+'\\b','iu').test(response.reply)))&&replyTimes.includes(r.time))&&!/\bi(?:['’]ve| have)? (?:set|scheduled|changed|updated)/i.test(response.reply);
+ // Everything she asked to save was already saved: the truthful reply says so, instead of failing on a draft that said "saved".
+ if(outcomes.length&&outcomes.every(o=>o.status==='duplicate')&&response.actions.every(a=>a.type==='save'))response={...response,reply:response.actions.every(a=>a.kind==='question')?'That question is already saved for your doctor, so I haven’t added it again.':'That’s already saved, so I haven’t added it again.'};
+ if(!reminderRead&&!outcomes.some(o=>!['read','duplicate'].includes(o.status))&&/(?:\bi(?:['’]ve| have)? (?:saved|kept|noted|recorded|added|updated|corrected|scheduled|set|deleted)|^(?:saved|added|corrected|scheduled|deleted)\b|reminder (?:is |has been )?(?:set|scheduled))/i.test(response.reply))throw Error('The reply claims an action that did not succeed.');
  if(outcomes.some(o=>o.status==='delete'))s.tasks=[];
  else{
   for(const task of response.open_tasks){source(task.sourceMessageId,sources.find(m=>m.messageId===task.sourceMessageId)?.text??'');if(task.targetId)owned(task.targetId);}

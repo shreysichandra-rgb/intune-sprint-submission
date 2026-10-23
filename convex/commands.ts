@@ -43,7 +43,8 @@ export const execute=internalMutation({args:{token:v.string(),command:controls,m
     if(startReceipt) await ctx.db.patch(startReceipt._id,{state:'complete'});
     return {outcome:'started',message:pilotEnabled()?'I’ve resumed tracking. Your paid pilot end time stays the same.':copy.commands_Started_a_fresh_seven_day_job_for,state:'active'};
   }
-  if(['pause','stop','delete'].includes(args.command))await clearConversationContext(ctx,user);
+  // Founder decision 22 Oct 2026: Pause only quiets reminders; her unfinished questions stay. Stop and Delete clear them.
+  if(['stop','delete'].includes(args.command))await clearConversationContext(ctx,user);
   if(args.command==='delete'){
     await purgeTestArchives(ctx,user._id);
     await purgeConversationLog(ctx,user);
@@ -84,7 +85,7 @@ export const execute=internalMutation({args:{token:v.string(),command:controls,m
     if(state!=='paused') await memoryChanged(ctx,user._id);
     await dropQueued(ctx,user);
     await ctx.db.patch(user._id,{state:'paused'});
-    return {outcome:'paused',message:pilotEnabled()?'Reminders paused. Your saved plans and updates are still here.':copy.commands_Paused_I_ll_stay_quiet_including_messages,state:'paused'};
+    return {outcome:'paused',message:pilotEnabled()?copy.pausedReply:copy.commands_Paused_I_ll_stay_quiet_including_messages,state:'paused'};
   }
   if(state!=='active') await memoryChanged(ctx,user._id);
   await ctx.db.patch(user._id,{state:'active'});

@@ -15,7 +15,7 @@ export async function clearConversationContext(ctx:MutationCtx,u:Doc<'users'>){
  for(const row of rows)await ctx.db.delete(row._id);
 }
 export async function readConversationContext(ctx:MutationCtx|QueryCtx,u:Doc<'users'>,messageId:string){
- if(!contextEnabled()||u.dataDeletedAt||u.safetyKind||u.state==='stopped'||u.state==='paused')return null;
+ if(!contextEnabled()||u.dataDeletedAt||u.safetyKind||u.state==='stopped')return null;
  const active=(await accessFor(ctx,u)).state==='active';
  const current=await ctx.db.query('conversationTurns').withIndex('by_user_message',q=>q.eq('userId',u._id).eq('messageId',messageId)).unique();
  const valid=(t:Doc<'conversationTurns'>)=>active&&t.jobId===u.jobId&&t.resetKey===u.pilotOnboardingResetKey&&t.expiresAt>Date.now();
@@ -62,7 +62,7 @@ export async function recordConversationReply(ctx:MutationCtx,u:Doc<'users'>,mes
  const receipt=await ctx.db.query('receipts').withIndex('by_user_message',q=>q.eq('userId',u._id).eq('messageId',messageId)).unique();
  if(receipt&&result.outcome!=='provider_duplicate'&&result.outcome!=='dropped'&&u.conversationConsent&&!u.pilotFreshConsentPending&&!u.safetyKind&&!u.dataDeletedAt)await ctx.db.patch(receipt._id,{recordIds:(result.changedIds??[]).slice(0,20),askedPendingId:u.conversationQuestionId});
  const t=await ctx.db.query('conversationTurns').withIndex('by_user_message',q=>q.eq('userId',u._id).eq('messageId',messageId)).unique();if(!t||t.stage==='complete'||['provider_duplicate','dropped'].includes(result.outcome))return;
- if(u.safetyKind||u.dataDeletedAt||u.storageWithdrawn||u.state==='stopped'||u.state==='paused'){await clearConversationContext(ctx,u);return;}
+ if(u.safetyKind||u.dataDeletedAt||u.storageWithdrawn||u.state==='stopped'){await clearConversationContext(ctx,u);return;}
  // This is temporary conversational state, not a saved clinical record or operator log.
  const request=await ctx.db.query('whatsappRequests').withIndex('by_user_message',q=>q.eq('userId',u._id).eq('messageId',messageId)).unique();
  await ctx.db.patch(t._id,{replyDelivery:request?'queued':'returned',reply:typeof result.message==='string'?result.message.slice(0,1500):undefined,recordIds:(result.changedIds??[]).slice(0,20),askedPendingId:u.conversationQuestionId,outcome:result.outcome,stage:result.outcome==='error'?'failed':'complete'});

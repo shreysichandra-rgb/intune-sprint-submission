@@ -8,7 +8,8 @@ import {offerCycleGap} from './cycleReminderSetup';
 import {offerScheduleReminders} from './scheduleReminderSetup';
 import {readReminders,applyReminder} from './pilotReminders';
 import {pilotEnabled,accessFor,inPilotPeriod} from './pilotAccess';
-import {readItems,itemsReply,groceryReply,applyItem,forgetPilotRecord} from './pilotMemory';
+import {readItems,itemsReply,conciseItemsReply,summaryText,summaryFactText,groceryReply,applyItem,forgetPilotRecord} from './pilotMemory';
+import {fullRecordReply} from './fullRecord';
 import {assertPilotWrite} from './pilotAccess';
 import {saveReply} from './deliveryState';
 import {v} from 'convex/values';
@@ -62,6 +63,7 @@ async function fingerprint(data:Awaited<ReturnType<typeof read>>,id:string){
  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(source))))).map(n=>n.toString(16).padStart(2,'0')).join('');
 }
 function summaryReply(data:Awaited<ReturnType<typeof read>>,user:Doc<'users'>,scope='week',label:string|null=null){
+ if(scope==='all'||scope==='history')return fullRecordReply(data,user);
  const lines:string[]=[];
  if(scope==='week'&&pilotEnabled()&&user.pilotStartedAt!==undefined&&user.pilotEndsAt!==undefined){const fmt=(at:number)=>new Intl.DateTimeFormat('en-IN',{timeZone:user.timezone,dateStyle:'medium',timeStyle:'short'}).format(at);lines.push(`Your pilot record: ${fmt(user.pilotStartedAt)} to ${fmt(user.pilotEndsAt)} (${user.timezone}).`);}
  if(scope==='all')scope='history';
@@ -88,7 +90,20 @@ function summaryReply(data:Awaited<ReturnType<typeof read>>,user:Doc<'users'>,sc
   if(scope==='cycle'&&!cycles.length)lines.push('No cycle events saved in this seven-day record.');
  }
  if((scope==='week'||scope==='plan')&&(!pilotEnabled()||data.plan.plan))lines.push(data.plan.plan?`${data.plan.plan.activity}: ${data.plan.progress} this week.`:copy.noConfirmedPlan);
- if(pilotEnabled()){if(['all','history','week','body','cycle'].includes(scope))for(const e of data.experiences.filter(e=>!['body','cycle'].includes(scope)||e.kind===scope))lines.push(`${e.status==='historical'?'Reported history':'Ongoing experience'}: ${e.label}. ${e.text} (${e.status}; not an episode count).`);lines.push(itemsReply(data.responsibilities,user,scope));if(['history','week','all'].includes(scope))for(const r of data.reminders)lines.push(`Reminder: ${r.title}, ${r.state}, ${new Intl.DateTimeFormat('en-IN',{timeZone:r.timezone,dateStyle:'medium',timeStyle:'short'}).format(r.dueAt)} (${r.timezone}), ${r.repeat}.`);}
+ if(pilotEnabled()){
+  if(scope==='week'){
+   const experiences=data.experiences;
+   if(experiences.length)lines.push('What you shared:\n'+experiences.slice(0,4).map(e=>'• '+summaryText(summaryFactText(e.label,e.text))+' ('+e.status+')').join('\n')+(experiences.length>4?'\n'+(experiences.length-4)+' more saved experiences available in your full record.':'')+'\nOngoing changes you describe are not counted as separate episodes.');
+   const items=conciseItemsReply(data.responsibilities,user);if(items)lines.push(items);
+   const active=data.reminders.filter(r=>r.state==='active'),stopped=data.reminders.filter(r=>r.state==='stopped').length,paused=data.reminders.filter(r=>r.state==='paused').length;
+   if(active.length)lines.push('Reminders marked active:\n'+active.slice(0,3).map(r=>'• '+summaryText(r.title,100)+', '+new Intl.DateTimeFormat('en-IN',{timeZone:r.timezone,dateStyle:'medium',timeStyle:'short'}).format(r.dueAt)+' ('+r.timezone+'), '+r.repeat).join('\n')+(active.length>3?'\n'+(active.length-3)+' more in your full record.':''));
+   if(stopped||paused)lines.push([stopped?stopped+' stopped reminders':null,paused?paused+' paused reminders':null].filter(Boolean).join('; ')+'. Their details remain in your full record.');
+   lines.push('I’ve counted only the sessions you told me you completed or skipped. For full details, including test notes and reminder history, send “Show my saved records”.');
+  }else{
+   if(['all','history','body','cycle'].includes(scope))for(const e of data.experiences.filter(e=>!['body','cycle'].includes(scope)||e.kind===scope))lines.push(`${e.status==='historical'?'Reported history':'Ongoing experience'}: ${e.label}. ${e.text} (${e.status}; not an episode count).`);
+   lines.push(itemsReply(data.responsibilities,user,scope));if(['history','all'].includes(scope))for(const r of data.reminders)lines.push(`Reminder: ${r.title}, ${r.state}, ${new Intl.DateTimeFormat('en-IN',{timeZone:r.timezone,dateStyle:'medium',timeStyle:'short'}).format(r.dueAt)} (${r.timezone}), ${r.repeat}.`);
+  }
+ }
  for(const event of [...data.body,...data.cycle])if(event.reportedTimePhrase)lines.push(`${'trackedItem' in event?event.trackedItem:event.label}: reported time ${event.reportedTimePhrase}.`);
  return lines.join('\n');
 }

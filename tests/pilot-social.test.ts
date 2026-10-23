@@ -13,7 +13,7 @@ test('complete casual entry leads to tracking, without a false occurrence, name 
  const f=await fixture(),before:any=await f.t.query(ref('pilotAccess:status'),{token:f.token});
  const inputs=['Hello how are you','Nothing much','What can u do','Okay','Can we start','Yes let’s begin'];
  const replies=[];for(const text of inputs)replies.push((await f.send(text)).message);
- expect(replies[0]).toContain('What would you like a hand remembering first?');expect(replies[0]).not.toMatch(/call you|your name/i);
+ expect(replies[0]).toMatch(/What would you like a hand remembering first[?:]/);expect(replies[0]).not.toMatch(/call you|your name/i);
  expect(replies[2]).toContain('grocery list');expect(replies[2]).toContain('Automatic reminders aren’t available yet');
  for(const i of [1,2,3,4,5])expect(replies[i]).toMatch(/What would you like me to keep track of(?: first)?\?/);
  for(const reply of replies){expect(reply).not.toContain('new occurrence');expect(reply).not.toContain('No additional responsibilities');expect(reply).not.toContain('May I save');expect(reply.match(/\?/g)).toHaveLength(1);}

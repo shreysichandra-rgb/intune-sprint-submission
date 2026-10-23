@@ -6,7 +6,7 @@ export type LimitKind='personal_hourly'|'burst'|'shared_capacity';
 export type LimitFailure={kind:'usage_limit';limits:LimitKind[];retryAt:number;checkedAt:number};
 // All budgets are read and checked before any write, in the caller's single mutation.
 export async function consumeAiQuota(ctx:MutationCtx,user:Doc<'users'>,firstCall:boolean){
- const now=Date.now(),access=await accessFor(ctx,user,now),personal=access.state==='active'&&access.source!=='trial'?100:20;
+ const now=Date.now(),access=await accessFor(ctx,user,now),personal=access.state==='active'?100:20; // trial, paid, coupon and test weeks alike (founder decision 23 Oct)
  const specs:[string,number,number,LimitKind][]=[[`user:${user._id}`,personal,3600000,'personal_hourly'],['global',500,3600000,'shared_capacity']];
  if(firstCall)specs.push([`burst:${user._id}`,10,60000,'burst']);
  const budgets=await Promise.all(specs.map(async([key,cap,window,kind])=>{const row=await ctx.db.query('quotas').withIndex('by_key',q=>q.eq('key',key)).unique();const times=(row?.times??[]).filter(t=>t>now-window).sort((a,b)=>a-b);return {key,cap,window,kind,row,times};}));

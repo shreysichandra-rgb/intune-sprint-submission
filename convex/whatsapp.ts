@@ -39,6 +39,9 @@ export const receive=httpAction(async(ctx,request)=>{
   if(!Array.isArray(value?.messages))continue;
   for(const m of value.messages){
    const referralAdId=metaReferralAdId(m?.referral);
+   // A tapped button (such as Pay or Not now on the trial-end template) is the same as her typing that text.
+   const tapped=m?.type==='button'&&typeof m.button?.text==='string'?m.button.text:m?.type==='interactive'&&typeof m.interactive?.button_reply?.title==='string'?m.interactive.button_reply.title:null;
+   if(tapped&&tapped.trim()&&tapped.length<=200){m.type='text';m.text={body:tapped};}
    if(process.env.INTUNE_PILOT_MODE==='v3'&&(mediaTypes.has(m?.type)||loggingEnabled()&&m?.type!=='text')){
     if(typeof m.from!=='string'||! /^[1-9]\d{7,14}$/.test(m.from)||typeof m.id!=='string'||!m.id||m.id.length>100)return response(400,copy.whatsapp_Invalid_text_message);
     const media=m[m.type];

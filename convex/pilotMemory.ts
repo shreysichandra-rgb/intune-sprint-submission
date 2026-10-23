@@ -23,6 +23,65 @@ export function itemsReply(data:Awaited<ReturnType<typeof readItems>>,u:Doc<'use
   return `${shownKind}: ${i.title}${timing}${['plan','schedule'].includes(i.kind)?` (${completed.length}/${i.target??'?'} in ${u.startDate} to ${u.endDate}; ${skipped.length} reported skipped; completed dates: ${completed.map(e=>e.date).join(', ')||'none'}; skipped dates: ${skipped.map(e=>e.date).join(', ')||'none'})`:events.length?` (completed dates: ${completed.map(e=>e.date).join(', ')||'none'}; skipped dates: ${events.filter(e=>e.status==='skipped'&&inPilotPeriod(u,e.date)).map(e=>e.date).join(', ')||'none'})`:''}. ${i.state}.${i.kind!=='grocery'?' '+i.text:''}`;
  });return lines.length?lines.join('\n'):'No additional responsibilities saved yet.';
 }
+// A recap is a bounded view of the record, not a rewrite or deletion of it.
+export function summaryText(text:string,max=180){const clean=text.replace(/\s+/g,' ').trim();return clean.length>max?clean.slice(0,max-1).trimEnd()+'…':clean;}
+// A short title and its saved description can carry different facts. Keep both.
+export function summaryFactText(label:string,text:string){
+ const clean=(s:string)=>s.replace(/\s+/g,' ').trim();
+ const a=clean(label),b=clean(text),fold=(s:string)=>s.toLowerCase().replace(/[.!?]+$/,'');
+ if(!a)return b;if(!b)return a;
+ if(fold(b).includes(fold(a)))return b;
+ if(fold(a).includes(fold(b)))return a;
+ return a.replace(/[.!?]+$/,'')+'. '+b;
+}
+// Rephrase only recognised question forms. Keep uncertainty and clinical choices
+// as questions for the doctor; never turn them into advice or infer a plan name.
+export function doctorQuestionSummary(title:string,text:string){
+ const original=summaryFactText(title,text).replace(/\s+/g,' ').trim();
+ const question=original.replace(/^(?:please\s+)?save (?:this |a )?question for my doctor:\s*/i,'').replace(/[?.!]+$/,'').trim();
+ if(/["“”‘’]|'[^']+'/u.test(original))return 'Question to discuss with your doctor: “'+original+'”';
+ const perspective=(s:string)=>s.replace(/\bmy\b/gi,'your').replace(/\bme\b/gi,'you').replace(/\bI am\b/g,'you are').replace(/\bI\b/g,'you');
+ const review=question.match(/^(?:can|could) we review ((?:my|the|your|this) .+)$/i);
+ if(review){
+  const next=/\s+at (?:the|my|our|your) next appointment$/i.test(review[1]);
+  const object=perspective(review[1].replace(/\s+at (?:the|my|our|your) next appointment$/i,''));
+  const unspecified=/^(?:your|the|this) (?:(?:existing|current) )?plan$/i.test(object);
+  return (next?'At your next appointment, ask':'Ask')+' your doctor to review '+object+'.'+(unspecified?' The saved note does not specify which plan.':'');
+ }
+ const forms:[RegExp,string][]=[
+  [/^should I (.+)$/i,'whether you should '],
+  [/^can I (.+)$/i,'whether you can '],
+  [/^could I (.+)$/i,'whether you could '],
+  [/^do I need to (.+)$/i,'whether you need to '],
+  [/^what should I (.+)$/i,'what you should '],
+  [/^how can I (.+)$/i,'how you can '],
+ ];
+ for(const [pattern,prefix]of forms){const m=question.match(pattern);if(m)return 'Ask your doctor '+prefix+perspective(m[1])+'.';}
+ return 'Question to discuss with your doctor: “'+original+'”';
+}
+export function conciseItemsReply(data:Awaited<ReturnType<typeof readItems>>,u:Doc<'users'>){
+ const tests=data.items.filter(i=>/\b(?:fictional|synthetic|test (?:note|question|packing|record|reminder))\b/i.test(i.title+' '+i.text));
+ const groups=new Map<string,string[]>();let shown=0,hidden=0;
+ for(const i of data.items){
+  if(tests.includes(i))continue;
+  const meta=(u.v4Records as any[]|undefined)?.find(r=>r.id===i._id);
+  const category=meta?.kind==='meal_choice'?'Meal choices':({plan:'Plans',schedule:'Schedules',doctor_question:'Doctor follow-up',task:'Tasks',food:'Food and supplement plans',grocery:'Groceries',appointment:'Appointments'} as Record<string,string>)[i.kind]??'Saved information';
+  const rows=groups.get(category)??[];
+  if(rows.length>=3||shown>=8){hidden++;continue;}
+  const same=i.text.trim().toLowerCase().includes(i.title.trim().toLowerCase());
+  let detail=summaryText(i.kind==='doctor_question'?doctorQuestionSummary(i.title,i.text):i.kind==='grocery'?i.title:same?i.text:i.title+': '+i.text,i.kind==='doctor_question'?260:180);
+  const date=typeof meta?.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(meta.date)?new Intl.DateTimeFormat('en-IN',{timeZone:u.timezone,dateStyle:'medium'}).format(new Date(meta.date+'T12:00:00Z')):null;
+  if(date||meta?.time)detail+=' ['+[date,meta?.time?summaryText(meta.time,40):null].filter(Boolean).join(' at ')+']';
+  const events=data.events.filter(e=>e.itemId===i._id&&inPilotPeriod(u,e.date)),completed=events.filter(e=>e.status==='completed'),skipped=events.filter(e=>e.status==='skipped');
+  if(['plan','schedule'].includes(i.kind)||events.length){
+   const dates=(rows:typeof events)=>{const days=[...new Set(rows.map(e=>e.date))];return days.length?' ('+days.slice(0,3).join(', ')+(days.length>3?', '+(days.length-3)+' more dates':'')+')':'';};
+   detail+=`; ${i.target!==undefined?completed.length+'/'+i.target:completed.length} reported completed${dates(completed)}; ${skipped.length} reported skipped${dates(skipped)}`;
+  }
+  if(i.state!=='planned'&&i.state!=='pending')detail+=' ('+i.state+')';
+  rows.push(detail);groups.set(category,rows);shown++;
+ }
+ return [...groups].map(([label,rows])=>label+':\n'+rows.map(r=>'• '+r).join('\n')).concat(hidden?[hidden+' more saved items available in your full record.']:[],tests.length?['Test notes: '+tests.length+' saved separately; available in your full record.']:[]).join('\n\n');
+}
 export function groceryReply(items:Doc<'pilotItems'>[],askStock=true){
  const groceries=items.filter(i=>i.kind==='grocery'&&!['stopped','paused'].includes(i.state));
  if(!groceries.length)return items.some(i=>i.kind==='grocery')?'Your shopping list is empty. Your saved information is still available.':'Share the foods in your existing plan and I can help make your grocery list.';

@@ -1,3 +1,4 @@
+import {notNowReply} from './copy';
 import {V4_FIRST_ACTION} from './v4Reply';
 import {checkoutMessage} from './checkoutPresentation';
 import {joinAdSource} from './acquisitionRules';
@@ -28,7 +29,7 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
  if(/\b(?:send|give)\b.*\b(?:summary|recap)\b.*\b(?:when|at)\b.*\b(?:pilot|seven days|7 days)\b.*\b(?:ends?|over|finish)/i.test(a.text))return await ctx.runMutation(ref<'mutation'>('pilotReminders:scheduleSummary'),{token:a.token,text:a.text});
  if(command==='start')return await ctx.runMutation(internal.commands.execute,{token:a.token,command,messageId:a.messageId});
  const permission=await ctx.runMutation(ref<'mutation'>('pilotTrial:permission'),{token:a.token,text:a.text});if(permission)return permission;
- if(/^join$/i.test(a.text.trim())&&access.state==='unpaid'){const trial:any=await ctx.runMutation(ref<'mutation'>('pilotTrial:join'),{token:a.token});if(trial)return {outcome:'greeting',controlOnly:true,message:'Welcome bhej rahi hoon. Uski confirmed delivery se tumhara24-hour free trial shuru hoga—no payment needed.'};}
+ if(/^join$/i.test(a.text.trim())&&access.state==='unpaid'){const trial:any=await ctx.runMutation(ref<'mutation'>('pilotTrial:join'),{token:a.token});if(trial)return {outcome:'greeting',controlOnly:true,message:'Sending your welcome now 👋 Your free 24-hour trial starts when it arrives.'};}
  const coupon=couponAttempt(a.text);if(coupon!==null){const result=await ctx.runMutation(ref<'mutation'>('pilotCoupon:redeem'),{token:a.token,code:coupon});if(result.outcome!=='coupon_exhausted')return result;
   try{const checkout:any=await ctx.runAction(ref<'action'>('pilotPayments:createCheckout'),{token:a.token});return {outcome:'unpaid',controlOnly:true,message:checkoutMessage(checkout.url,currentPaymentMode()==='razorpay_test')};}catch{return {outcome:'unpaid',controlOnly:true,message:result.message+' Send Join for your secure checkout. No payment has been taken.'};}
  }
@@ -38,7 +39,8 @@ export const send=internalAction({args:{token:v.string(),messageId:v.string(),te
  const weekly=command==='summary'||/^summary[.!?]?$/i.test(a.text.trim())||matchRetrieval(a.text)==='week'||directWeeklyRequest(a.text);
  const retrieval=weekly||matchRetrieval(a.text)||directLegacyHistoryRequest(a.text);
  if(retrieval||process.env.INTUNE_DIRECT_RECORD_READ!=='0'&&directRecordRequest(a.text)){const h:any=await ctx.runQuery(weekly?conversationRefs.recordReply:conversationRefs.history,weekly?{token:a.token,scope:'week'}:{token:a.token});const offered=weekly&&await ctx.runMutation(ref<'mutation'>('pilotSummary:offer'),{token:a.token,messageId:a.messageId,version:h.version});return {outcome:'summary',message:h.message+(offered?'\nYou can correct an existing record, or say “go ahead” to approve this summary as accurate.':''),version:h.version};}
- if(access.source==='trial'&&/^(?:join|hi|hello|hey)[.!]?$/i.test(a.text.trim())){if(access.state==='eligible')return {outcome:'greeting',controlOnly:true,message:'Tumhara trial welcome pending hai. Confirmed delivery se24hours start honge; Join dobara bhejne se clock restart nahi hogi.'};if(access.state==='active')return {outcome:'greeting',controlOnly:true,message:'Tumhara24-hour free trial active hai. Apna existing food plan paste karo, ya batao kya yaad rakhna hai. Repeat Join se trial restart nahi hota.'};}
+ if(access.source==='trial'&&/^(?:join|hi|hello|hey)[.!]?$/i.test(a.text.trim())){if(access.state==='eligible')return {outcome:'greeting',controlOnly:true,message:'Your welcome is on its way 👋 Your free 24-hour trial starts when it arrives.'};if(access.state==='active')return {outcome:'greeting',controlOnly:true,message:'Hi 👋 Your free trial is on. You can send me a body change, a plan from your doctor or dietitian, a food plan for a grocery list, a question for your doctor, or ask for a reminder. What would you like to start with?'};}
+ if(access.state==='expired'&&/^not now[.!]?$/i.test(a.text.trim()))return {outcome:'help',controlOnly:true,message:notNowReply};
  if(access.state==='expired'&&/^(?:pay|join|checkout)$/i.test(a.text.trim())){try{const checkout:any=await ctx.runAction(ref<'action'>('pilotPayments:createCheckout'),{token:a.token});return {outcome:'unpaid',controlOnly:true,message:checkoutMessage(checkout.url,currentPaymentMode()==='razorpay_test')};}catch{return {outcome:'unpaid',controlOnly:true,message:'Secure checkout abhi available nahi hai. No payment taken. Tumhare saved records available hain.'};}}
  if(access.state==='eligible'&&matchGreeting(a.text)){const welcome=await ctx.runQuery(ref<'query'>('pilotWelcome:greeting'),{token:a.token});if(welcome)return welcome;}
  // Join is an entry request, not a new payment or a health update.

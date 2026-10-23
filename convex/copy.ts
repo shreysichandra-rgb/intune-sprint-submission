@@ -49,7 +49,7 @@ export const commands_Your_health_records_have_been_deleted_Your="Your health re
 
 export const commands_Paused_I_ll_stay_quiet_including_messages="Of course. I’ll stay quiet for now, but I’ll still keep track when you message me.";
 
-export const commands_Resumed_Future_messages_you_ve_agreed_to="We’re back 👍 The reminders and messages you asked for can come through again. I won’t send the ones you missed while paused.";
+export const commands_Resumed_Future_messages_you_ve_agreed_to="Welcome back 👍 Your reminders are on again. I won’t send the ones you missed while you were away.";
 
 export const http_Message_endpoint_is_not_configured="Message endpoint is not configured.";
 
@@ -317,3 +317,23 @@ export const symptomDetailsQuestion=({item}:{item:string})=>`What would you like
 export const medicalQuestionReply='That’s something to discuss with your doctor. I can’t tell you what’s causing these changes or whether HRT is right for you. I can keep tracking what you’ve noticed, so you have a clearer picture for that conversation.';
 
 export const whatsapp_Text_only_upload_reply="I can only read text messages right now. I can’t read PDFs, photos or voice notes yet. Please paste or type the details here. Nothing from this upload was saved.";
+
+// Founder-approved capable-behen wording for fixed replies, 22 October 2026 (docs/drafts/FIXED-REPLIES-BEHEN-DRAFT.md).
+export const failedUpdateReply='Sorry, that one didn’t go through 😕 Nothing new was saved, and everything from before is safe. Could you send it again?';
+export const pausedReply='Done, reminders are paused 👍 Everything you’ve saved is still here. Send Resume whenever you want them back.';
+export const notNowReply='No problem 🙂 Your notes stay right here whenever you need them.';
+// A trial lasts 24 hours, so a trial user hears "free trial", not "week".
+export function accessEndedReply(source?:string|null){return (source==='trial'?'Your free trial has ended, so I couldn’t save that one. Everything you saved before is still here to look at, correct or delete. Send Pay if you’d like to continue for ₹99 for seven days.':'Your InTune week has ended, so I couldn’t save that one. Everything you saved before is still here to look at, correct or delete. Send Pay if you’d like another week.');}
+export function notStartedReply(){return process.env.INTUNE_TRIAL_ENABLED==='1'?'I can’t save new things just yet. Send Join to start (free for 24 hours), or enter your coupon if you have one. Anything you saved before is still here.':'I can’t save new things just yet. Send Join to start, or enter your coupon if you have one. Anything you saved before is still here.';}
+
+// When a turn is refused for a reason she can act on, say that reason instead of the generic failure. Nothing was saved in any of these cases.
+export function explainedFailureReply(error:string):string|null{
+ if(/after this paid pilot ends/i.test(error))return 'That’s after your InTune week ends, so I couldn’t set that reminder. Tell me a time before then and I’ll set it 👍';
+ if(/stated date needs clarification|completion date needs clarification/i.test(error))return 'Which date did you mean? I haven’t saved it yet.';
+ if(/clock time needs clarification|Reminder time is unclear/i.test(error))return 'What time did you mean? I haven’t saved it yet.';
+ // A tangled multi-reminder message: ask for them one at a time instead of a bare "send again".
+ if(/Reminder purpose continuation|Contextual sources are only permitted for reminders|Reminder days must come from|Reminder clock must come from/i.test(error))return 'I couldn’t set that up in one go 😕 Nothing new was saved. Could you send each reminder as its own message, with the day and time? For example: Remind me today at 5 pm to go grocery shopping.';
+ if(/^Reminder delivery is not configured/i.test(error))return 'I can’t send reminders just yet, so I haven’t set one. Nothing new was saved.';
+ const question=error.trim();if(question.length<=160&&/^(?:Which|What|When|Should|Do|Did|Is|Was)\b[^?]*\?$/.test(question))return question+' I haven’t saved it yet.';
+ return null;
+}

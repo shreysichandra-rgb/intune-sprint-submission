@@ -43,6 +43,9 @@ export function resolveTime(phrase: string | null): string | null {
   const cleaned=phrase?.trim().toLowerCase().replace(/\./g,'').replace(/\s+ist$/,'');
   const clock=cleaned?.replace(/^(?:around |about |at |approximately |~)/,'');
   if(clock&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock))return clock;
+  // Hinglish: "subah 9 baje", "shaam 7 baje", "9 baje raat".
+  const baje=cleaned?.match(/^(?:(subah|sube|savere|sawere|dopahar|dopehar|shaam|sham|raat)\s+)?(\d{1,2})(?::(\d{2}))?\s*baje(?:\s+(subah|sube|savere|sawere|dopahar|dopehar|shaam|sham|raat))?$/);
+  if(baje&&(baje[1]||baje[4])&&+baje[2]>=1&&+baje[2]<=12&&+(baje[3]||0)<=59){const part=(baje[1]||baje[4])!,h=+baje[2];const pm=/^(?:shaam|sham)$/.test(part)||/^dop/.test(part)&&h!==12&&h<=6||part==='raat'&&h>=6&&h<12;const hour=part==='raat'&&h===12?0:pm?h%12+12:/^(?:subah|sube|savere|sawere)$/.test(part)?h%12:h;return String(hour).padStart(2,'0')+':'+(baje[3]||'00');}
   const match = cleaned?.match(/^(?:around |about |at |approximately |~)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
   if (!match || +match[1] < 1 || +match[1] > 12 || +(match[2] || 0) > 59) return null;
   return String(+match[1] % 12 + (match[3] === 'pm' ? 12 : 0)).padStart(2, '0') + ':' + (match[2] || '00');

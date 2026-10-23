@@ -1,4 +1,13 @@
 import {v4ReplyLanguage} from './v4Reply';
+/** She explicitly asked for English, but the reply only quotes a Hindi or
+ * Hinglish note with a few English words around it. */
+export function untranslatedQuoteReply(request:string,reply:unknown):boolean {
+ if(typeof reply!=='string'||v4ReplyLanguage(request)!=='English'||!/\benglish\b/i.test(request)||/\b(?:original|exact|verbatim)\b/i.test(request))return false;
+ const quote=/[“"]([^”"]+)[”"]/gu;
+ if(![...reply.matchAll(quote)].some(m=>v4ReplyLanguage(m[1])!=='English'))return false;
+ const outside=reply.replace(quote,' ');
+ return v4ReplyLanguage(outside)!=='English'||outside.replace(/[^A-Za-z\s]/g,' ').trim().split(/\s+/).filter(w=>w.length>2).length<6;
+}
 /** Only a language-only explanation request. Mixed facts, controls and quoted
  * text must continue through the normal independent interpretation checks. */
 export function languageExplanationReply(text:string,state:any,trialEnabled:boolean):string|null {

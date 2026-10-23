@@ -1,7 +1,7 @@
 /** Clear first-contact copy, shared by delivered welcome and recovery. */
 export const V4_INTRODUCTION="Hi, I’m InTune 👋 I help you keep your health plans and everyday details together during perimenopause. One less thing to hold in your head.\n\nText or paste a plan you already have. I can turn your food plan into a grocery list, or help you track your physio sessions.\n\nText only for now. Your details stay until you ask me to delete them.";
 // The action question follows confirmed delivery and expiry information.
-export const V4_FIRST_ACTION="What would you like a hand remembering first? You can tell me about symptoms you’re experiencing, a question for your doctor, or a workout or nutrition plan you’re following.\n\nFor example:\n• “I’ve been waking up tired this week.”\n• “Remind me to ask my doctor about my irregular periods.”\n• “My physio sessions are Monday, Wednesday and Friday at 9 am.”\n• “Here’s my nutrition plan. Help me make a grocery list.”\n\nJust type it as you’d tell a friend. We’ll take it one thing at a time.";
+export const V4_FIRST_ACTION="What would you like a hand remembering first: a body change, an existing workout or food plan, or a question for your doctor?\n\nFor example: “I’ve been waking up tired this week. Keep a note of it.” Just type it as you’d tell a friend.";
 export const V4_WELCOME=V4_INTRODUCTION;
 
 /** Preserve an introduction without attaching a second empty greeting. */
@@ -16,14 +16,17 @@ export function preserveV4Introduction(reply:string,previous:string,required:boo
 /** A quoted saved question is data, not a new clarification request. */
 export function lastV4Question(reply:string):string|null {
  const unquoted=reply.replace(/“[^”\n]*\?[^”\n]*”|"[^"\n]*\?[^"\n]*"/g,'.');
- return unquoted.match(/[^.!?]*\?/g)?.at(-1)?.trim()||null;
+ return unquoted.match(/[^.!?]*\?/g)?.at(-1)?.trim().replace(/^[”"’]+\s*/,'')||null;
 }
 
 /** A reply writer may reword confirmations, but must not replace an unanswered question. */
 export function preserveV4Question(reply:string,question:string|null):string {
  const quotes:string[]=[];
  const protectedReply=reply.replace(/“[^”\n]*\?[^”\n]*”|"[^"\n]*\?[^"\n]*"/g,quoted=>{const index=quotes.push(quoted)-1;return '\uE000'+index+'\uE001.';});
- let statements=protectedReply.replace(/[^.!?]*\?/g,'').trim().replace(/\uE000(\d+)\uE001\./g,(_match,index)=>quotes[Number(index)]);
+ // "Would you like me to save “…?”" is a question even though its question mark sits inside the quote.
+ const unquestioned=question?protectedReply.replace(/(?:^|(?<=[.!?]\s))(?:Would|Do|Shall|Should|Can|Could|Want|May)\b[^.!?\uE000]*\uE000\d+\uE001\./g,''):protectedReply;
+ // A closing quote right after a full stop belongs to the sentence before the question.
+ let statements=unquestioned.replace(/[^.!?]*\?/g,(q:string)=>q.match(/^[”"’]+/)?.[0]??'').trim().replace(/\uE000(\d+)\uE001\./g,(_match,index)=>quotes[Number(index)]);
  if(!question)return statements;
  // A backend question can include a helpful second sentence; keep it once.
  for(const sentence of question.match(/[^.!?]+[.!]/g)??[])statements=statements.split(sentence.trim()).join('').trim();
@@ -151,5 +154,5 @@ export function v4ReplyLanguage(text:string):string|null {
  if(languageRequest&&/\bhinglish\b/iu.test(text))return 'Hinglish (natural Roman Hindi mixed with English)';
  if(/[\u0900-\u097f]/u.test(text))return 'Hindi';
  if(languageRequest&&/\bhindi\b/iu.test(text))return 'Hinglish (natural Roman Hindi mixed with English)';
- return /\b(?:aaj|yaad|dilana|mera|meri|mere|mein|hain|hai|hoon|mujhe|batao|dikhao|karo|karna|chahiye|nahi|nhi|haan|kaise|khaya|bhejo)\b/i.test(text)?'Hinglish (natural Roman Hindi mixed with English)':/[A-Za-z]/.test(text)?'English':null;
+ return /\b(?:aaj|yaad|dilana|mera|meri|mere|mein|hain|hai|hoon|mujhe|batao|dikhao|karo|karna|chahiye|nahi|nhi|haan|kaise|khaya|bhejo|aur|bhi|lena|kya|kab|kyun|ghar|abhi|thoda|bahut|daal|diya|liya|hoga|kuch|kitna|wala|wali)\b/i.test(text)?'Hinglish (natural Roman Hindi mixed with English)':/[A-Za-z]/.test(text)?'English':null;
 }

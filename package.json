@@ -20,7 +20,8 @@
     "lab:backend": "node scripts/lab-backend.mjs",
     "lab:evaluate": "node scripts/evaluate-conversation-lab.mjs",
     "qa:run": "node scripts/run-conversation-qa.mjs",
-    "pretest": "node scripts/prepare-test-output.mjs"
+    "pretest": "node scripts/prepare-test-output.mjs",
+    "scoreboard": "node scripts/scoreboard.mjs"
   },
   "keywords": [],
   "author": "",
